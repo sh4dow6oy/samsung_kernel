@@ -1,0 +1,84 @@
+# Makefile - kernel build helper for CI/local usage
+# Usage examples:
+#  make DEFCONFIG=G770F_defconfig        # prepare .config
+#  make all DEFCONFIG=G770F_defconfig    # build kernel, dtbs, modules
+#  make package RAMDISK=ramdisk.img BASE=0x10000000 PAGESIZE=4096 CMDLINE="..." # build and pack boot_custom.img
+
+ARCH ?= arm64
+CROSS_COMPILE ?= aarch64-linux-gnu-
+OUT ?= out
+DEFCONFIG ?= G770F_defconfig
+JOBS ?= $(shell nproc)
+KERNEL_MAKE := $(MAKE) O=$(OUT) ARCH=$(ARCH) CROSS_COMPILE=$(CROSS_COMPILE)
+
+.PHONY: all defconfig build image dtbs modules package clean help
+
+help:
+	@echo "Targets:"
+	@echo "  defconfig   - apply defconfig (make O=$(OUT) $(DEFCONFIG))"
+	@echo "  build       - full kernel build (make -j$(JOBS) O=$(OUT))"
+	@echo "  image       - build kernel image (Image or Image.gz-dtb)"
+	@echo "  dtbs        - build device tree blobs"
+	@echo "  modules     - build modules"
+	@echo "  package     - pack boot_custom.img (requires RAMDISK, BASE, PAGESIZE, CMDLINE)"
+	@echo "  clean       - clean build output"
+	@echo ""
+	@echo "Usage examples:"
+	@echo "  make DEFCONFIG=G770F_defconfig all"
+	@echo "  make package RAMDISK=ramdisk.img BASE=0x10000000 PAGESIZE=4096 CMDLINE='console=ttyS0'"
+
+defconfig:
+	@echo "[Makefile] Applying defconfig: $(DEFCONFIG)"
+	$(KERNEL_MAKE) $(DEFCONFIG)
+
+build: defconfig
+	@echo "[Makefile] Building kernel (jobs=$(JOBS))"
+	$(KERNEL_MAKE) -j$(JOBS)
+
+image:
+	@echo "[Makefile] Building kernel image"
+	-$(KERNEL_MAKE) Image || $(KERNEL_MAKE) Image.gz-dtb
+
+dtbs:
+	@echo "[Makefile] Building dtbs"
+	$(KERNEL_MAKE) dtbs
+
+modules:
+	@echo "[Makefile] Building modules"
+	$(KERNEL_MAKE) modules
+
+all: build dtbs modules
+
+package: image
+ifndef RAMDISK
+	@echo "ERROR: RAMDISK not provided. Usage: make package RAMDISK=ramdisk.img BASE=0x... PAGESIZE=4096 CMDLINE='...'"
+	@exit 1
+endif
+ifndef BASE
+	@echo "ERROR: BASE not provided. Usage: make package RAMDISK=ramdisk.img BASE=0x... PAGESIZE=4096 CMDLINE='...'"
+	@exit 1
+endif
+ifndef PAGESIZE
+	@echo "ERROR: PAGESIZE not provided. Usage: make package RAMDISK=ramdisk.img BASE=0x... PAGESIZE=4096 CMDLINE='...'"
+	@exit 1
+endif
+	@echo "[Makefile] Packaging boot image"
+	# prefer Image.gz-dtb when present
+	if [ -f $(OUT)/arch/arm64/boot/Image.gz-dtb ]; then \
+	  KIMG=$(OUT)/arch/arm64/boot/Image.gz-dtb; \
+	elif [ -f $(OUT)/arch/arm64/boot/Image ]; then \
+	  KIMG=$(OUT)/arch/arm64/boot/Image; \
+	else \
+	  echo "Kernel image not found in $(OUT)/arch/arm64/boot"; exit 1; \
+	fi; \
+	# ensure mkbootimg.py exists in cwd
+	if [ ! -f mkbootimg.py ]; then \
+	  echo "mkbootimg.py not found in repo root; please add it or run the pack step manually"; exit 1; \
+	fi; \
+	python3 mkbootimg.py --kernel $$KIMG --ramdisk $(RAMDISK) --base $(BASE) --pagesize $(PAGESIZE) --cmdline "$(CMDLINE)" --output boot_custom.img; \
+	echo "Created boot_custom.img"
+
+clean:
+	@echo "[Makefile] Cleaning..."
+	$(KERNEL_MAKE) clean || true
+	-rm -rf $(OUT) boot_custom.img
