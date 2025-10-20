@@ -2,6 +2,11 @@ name: Build Samsung SM-G770F Kernel
 
 on:
   workflow_dispatch:
+    inputs:
+      model:
+        description: 'Device model (e.g., g770f)'
+        required: true
+        default: g770f
 
 jobs:
   build-kernel:
@@ -20,44 +25,58 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential clang make git bc bison flex libssl-dev libncurses5-dev libelf-dev wget tar
+          sudo apt-get install -y build-essential clang make git bc bison flex libssl-dev libncurses5-dev libelf-dev wget unzip
 
-      # 3️⃣ Setup Proton Clang (doar Clang, fără GCC)
+      # 3️⃣ Setup Proton Clang from ZIP
       - name: Setup Proton Clang toolchain
         run: |
           TOOLCHAIN_PATH="$PWD/toolchain/clang"
           mkdir -p "$TOOLCHAIN_PATH"
-          wget -O proton-clang.tar.xz "https://github.com/kdrag0n/proton-clang/releases/download/17.0.0/clang-r493334b.tar.xz"
-          tar -xf proton-clang.tar.xz -C "$TOOLCHAIN_PATH"
-          echo "PATH=$TOOLCHAIN_PATH/clang-r493334b/bin:$PATH" >> $GITHUB_ENV
+          echo "⬇️ Downloading Proton Clang..."
+          wget -O proton-clang.zip "https://github.com/kdrag0n/proton-clang/archive/refs/tags/20210522.zip"
+          echo "📦 Extracting Proton Clang..."
+          unzip -q proton-clang.zip -d "$TOOLCHAIN_PATH"
+          TOOLCHAIN_BIN="$TOOLCHAIN_PATH/proton-clang-20210522/bin"
+          echo "PATH=$TOOLCHAIN_BIN:$PATH" >> $GITHUB_ENV
           echo "CC=clang" >> $GITHUB_ENV
-          echo "Proton Clang setup complete"
+          echo "CROSS_COMPILE=aarch64-linux-gnu-" >> $GITHUB_ENV
+          echo "✅ Proton Clang setup complete"
 
-      # 4️⃣ Clean output folder
+      # 4️⃣ Detect defconfig
+      - name: Detect defconfig
+        id: detect-config
+        run: |
+          MODEL=${{ github.event.inputs.model }}
+          DEFCONFIG=$(ls arch/arm64/configs/*_${MODEL}_defconfig 2>/dev/null || ls arch/arm64/configs/*_defconfig | head -n 1)
+          if [ -z "$DEFCONFIG" ]; then
+            echo "❌ Error: No defconfig found for model $MODEL"
+            exit 1
+          fi
+          echo "✅ Using defconfig: $DEFCONFIG"
+          echo "DEFCONFIG_NAME=$(basename $DEFCONFIG)" >> $GITHUB_OUTPUT
+
+      # 5️⃣ Clean previous build output
       - name: Clean output folder
         run: rm -rf out
 
-      # 5️⃣ Configure kernel using g770f_defconfig
+      # 6️⃣ Configure kernel
       - name: Configure kernel
-        run: make O=out ARCH=arm64 g770f_defconfig CC=$CC
+        run: make O=out ARCH=arm64 ${{ steps.detect-config.outputs.DEFCONFIG_NAME }} CC=$CC
 
-      # 6️⃣ Build kernel
+      # 7️⃣ Build kernel
       - name: Build kernel
-        run: make O=out ARCH=arm64 CC=$CC -j$(nproc)
+        run: make O=out ARCH=arm64 CC=$CC CROSS_COMPILE=$CROSS_COMPILE -j$(nproc)
 
-      # 7️⃣ Package kernel + dtb + modules
+      # 8️⃣ Package kernel + modules
       - name: Package kernel
         run: |
           mkdir -p package
-          # Copy Image.gz-dtb
           cp out/arch/arm64/boot/Image.gz-dtb package/
-          # Install modules into package
           make O=out ARCH=arm64 INSTALL_MOD_PATH=package modules_install
-          # Create tar.gz
           tar -czvf kernel-sm-g770f.tar.gz -C package .
         working-directory: ./kernel
 
-      # 8️⃣ Upload packaged kernel
+      # 9️⃣ Upload packaged kernel
       - name: Upload packaged kernel
         uses: actions/upload-artifact@v4
         with:
