@@ -13,7 +13,6 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1️⃣ Checkout kernel source
       - name: Checkout kernel source
         uses: actions/checkout@v3
         with:
@@ -21,28 +20,23 @@ jobs:
           ref: SM-G770F
           submodules: recursive
 
-      # 2️⃣ Install build dependencies
       - name: Install build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential clang make git bc bison flex libssl-dev libncurses5-dev libelf-dev wget unzip
 
-      # 3️⃣ Setup Proton Clang from ZIP
-      - name: Setup Proton Clang toolchain
+      - name: Setup Proton Clang 17.0.0 toolchain
         run: |
           TOOLCHAIN_PATH="$PWD/toolchain/clang"
           mkdir -p "$TOOLCHAIN_PATH"
-          echo "⬇️ Downloading Proton Clang..."
-          wget -O proton-clang.zip "https://github.com/kdrag0n/proton-clang/archive/refs/tags/20210522.zip"
-          echo "📦 Extracting Proton Clang..."
-          unzip -q proton-clang.zip -d "$TOOLCHAIN_PATH"
-          TOOLCHAIN_BIN="$TOOLCHAIN_PATH/proton-clang-20210522/bin"
+          wget -O proton-clang.tar.xz "https://github.com/kdrag0n/proton-clang/releases/download/17.0.0/clang-r493334b.tar.xz"
+          tar -xf proton-clang.tar.xz -C "$TOOLCHAIN_PATH"
+          TOOLCHAIN_BIN="$TOOLCHAIN_PATH/clang-r493334b/bin"
           echo "PATH=$TOOLCHAIN_BIN:$PATH" >> $GITHUB_ENV
           echo "CC=clang" >> $GITHUB_ENV
           echo "CROSS_COMPILE=aarch64-linux-gnu-" >> $GITHUB_ENV
           echo "✅ Proton Clang setup complete"
 
-      # 4️⃣ Detect defconfig
       - name: Detect defconfig
         id: detect-config
         run: |
@@ -55,19 +49,15 @@ jobs:
           echo "✅ Using defconfig: $DEFCONFIG"
           echo "DEFCONFIG_NAME=$(basename $DEFCONFIG)" >> $GITHUB_OUTPUT
 
-      # 5️⃣ Clean previous build output
       - name: Clean output folder
         run: rm -rf out
 
-      # 6️⃣ Configure kernel
       - name: Configure kernel
         run: make O=out ARCH=arm64 ${{ steps.detect-config.outputs.DEFCONFIG_NAME }} CC=$CC
 
-      # 7️⃣ Build kernel
       - name: Build kernel
         run: make O=out ARCH=arm64 CC=$CC CROSS_COMPILE=$CROSS_COMPILE -j$(nproc)
 
-      # 8️⃣ Package kernel + modules
       - name: Package kernel
         run: |
           mkdir -p package
@@ -76,7 +66,6 @@ jobs:
           tar -czvf kernel-sm-g770f.tar.gz -C package .
         working-directory: ./kernel
 
-      # 9️⃣ Upload packaged kernel
       - name: Upload packaged kernel
         uses: actions/upload-artifact@v4
         with:
