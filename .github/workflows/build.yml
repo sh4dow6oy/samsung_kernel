@@ -8,7 +8,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1️⃣ Checkout the kernel repository
+      # 1️⃣ Checkout kernel source
       - name: Checkout kernel source
         uses: actions/checkout@v3
         with:
@@ -25,7 +25,7 @@ jobs:
       # 3️⃣ Setup Clang toolchain
       - name: Setup Clang toolchain
         run: |
-          TOOLCHAIN_PATH="$PWD/kernel/toolchain/clang"
+          TOOLCHAIN_PATH="$PWD/toolchain/clang"
           mkdir -p "$TOOLCHAIN_PATH"
           wget -O clang.tar.gz "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/bd96dfe349c962681f0e5388af874c771ef96670/clang-r416183b.tar.gz"
           tar -xf clang.tar.gz -C "$TOOLCHAIN_PATH"
@@ -38,7 +38,7 @@ jobs:
       # 4️⃣ Setup GCC AArch64 toolchain
       - name: Setup GCC AArch64 toolchain
         run: |
-          TOOLCHAIN_PATH="$PWD/kernel/toolchain/gcc"
+          TOOLCHAIN_PATH="$PWD/toolchain/gcc"
           mkdir -p "$TOOLCHAIN_PATH"
           wget -O gcc-aarch64.tar.gz "https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/+archive/refs/heads/master.tar.gz"
           tar -xf gcc-aarch64.tar.gz -C "$TOOLCHAIN_PATH"
@@ -50,36 +50,19 @@ jobs:
 
       # 5️⃣ Clean output folder
       - name: Clean output folder
-        run: rm -rf kernel/out
+        run: rm -rf out
 
-      # 6️⃣ Generate defconfig if missing
-      - name: Generate defconfig if missing
-        run: |
-          DEFCONFIG_FILE="arch/arm64/configs/g770f_defconfig"
-          if [ ! -f "$DEFCONFIG_FILE" ]; then
-            echo "Defconfig not found. Generating default..."
-            make O=out ARCH=arm64 defconfig CC=$CC CROSS_COMPILE=$CROSS_COMPILE
-            mkdir -p arch/arm64/configs
-            cp out/.config "$DEFCONFIG_FILE"
-            echo "Generated $DEFCONFIG_FILE"
-          else
-            echo "Defconfig already exists: $DEFCONFIG_FILE"
-          fi
-        working-directory: ./kernel
-
-      # 7️⃣ Configure kernel
+      # 6️⃣ Configure kernel using g770f_defconfig
       - name: Configure kernel
         run: make O=out ARCH=arm64 g770f_defconfig CC=$CC CROSS_COMPILE=$CROSS_COMPILE
-        working-directory: ./kernel
 
-      # 8️⃣ Build kernel
+      # 7️⃣ Build kernel
       - name: Build kernel
         run: make O=out ARCH=arm64 CC=$CC CROSS_COMPILE=$CROSS_COMPILE -j$(nproc)
-        working-directory: ./kernel
 
-      # 9️⃣ Upload kernel image
+      # 8️⃣ Upload kernel image
       - name: Upload kernel image
         uses: actions/upload-artifact@v4
         with:
           name: kernel-image
-          path: kernel/out/arch/arm64/boot/Image.gz-dtb
+          path: out/arch/arm64/boot/Image.gz-dtb
