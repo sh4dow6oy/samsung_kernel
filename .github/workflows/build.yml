@@ -20,49 +20,46 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential clang make gcc git bc bison flex libssl-dev libncurses5-dev libelf-dev wget tar
+          sudo apt-get install -y build-essential clang make git bc bison flex libssl-dev libncurses5-dev libelf-dev wget tar
 
-      # 3️⃣ Setup Clang toolchain
-      - name: Setup Clang toolchain
+      # 3️⃣ Setup Proton Clang toolchain (modern)
+      - name: Setup Proton Clang toolchain
         run: |
           TOOLCHAIN_PATH="$PWD/toolchain/clang"
           mkdir -p "$TOOLCHAIN_PATH"
-          wget -O clang.tar.gz "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/bd96dfe349c962681f0e5388af874c771ef96670/clang-r416183b.tar.gz"
-          tar -xf clang.tar.gz -C "$TOOLCHAIN_PATH"
-          export PATH="$TOOLCHAIN_PATH/clang-r416183b/bin:$PATH"
-          export CC=clang
-          echo "PATH=$PATH" >> $GITHUB_ENV
-          echo "CC=$CC" >> $GITHUB_ENV
-          echo "Clang toolchain setup complete"
+          wget -O proton-clang.tar.xz "https://github.com/kdrag0n/proton-clang/releases/download/16.0.0/clang-r481631b.tar.xz"
+          tar -xf proton-clang.tar.xz -C "$TOOLCHAIN_PATH"
+          echo "PATH=$TOOLCHAIN_PATH/clang-r481631b/bin:$PATH" >> $GITHUB_ENV
+          echo "CC=clang" >> $GITHUB_ENV
+          echo "LLVM toolchain ready"
 
-      # 4️⃣ Setup GCC AArch64 toolchain
-      - name: Setup GCC AArch64 toolchain
-        run: |
-          TOOLCHAIN_PATH="$PWD/toolchain/gcc"
-          mkdir -p "$TOOLCHAIN_PATH"
-          wget -O gcc-aarch64.tar.gz "https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/+archive/refs/heads/master.tar.gz"
-          tar -xf gcc-aarch64.tar.gz -C "$TOOLCHAIN_PATH"
-          export PATH="$TOOLCHAIN_PATH/aarch64-linux-android-4.9/bin:$PATH"
-          export CROSS_COMPILE=aarch64-linux-android-
-          echo "PATH=$PATH" >> $GITHUB_ENV
-          echo "CROSS_COMPILE=$CROSS_COMPILE" >> $GITHUB_ENV
-          echo "GCC AArch64 toolchain setup complete"
-
-      # 5️⃣ Clean output folder
+      # 4️⃣ Clean output folder
       - name: Clean output folder
         run: rm -rf out
 
-      # 6️⃣ Configure kernel using g770f_defconfig
+      # 5️⃣ Configure kernel using g770f_defconfig
       - name: Configure kernel
-        run: make O=out ARCH=arm64 g770f_defconfig CC=$CC CROSS_COMPILE=$CROSS_COMPILE
+        run: make O=out ARCH=arm64 g770f_defconfig CC=$CC
 
-      # 7️⃣ Build kernel
+      # 6️⃣ Build kernel
       - name: Build kernel
-        run: make O=out ARCH=arm64 CC=$CC CROSS_COMPILE=$CROSS_COMPILE -j$(nproc)
+        run: make O=out ARCH=arm64 CC=$CC -j$(nproc)
 
-      # 8️⃣ Upload kernel image
-      - name: Upload kernel image
+      # 7️⃣ Package kernel + dtb + modules
+      - name: Package kernel
+        run: |
+          mkdir -p package
+          # Copy Image.gz-dtb
+          cp out/arch/arm64/boot/Image.gz-dtb package/
+          # Copy modules
+          make O=out ARCH=arm64 INSTALL_MOD_PATH=package modules_install
+          # Create tar.gz
+          tar -czvf kernel-sm-g770f.tar.gz -C package .
+        working-directory: ./kernel
+
+      # 8️⃣ Upload packaged kernel
+      - name: Upload packaged kernel
         uses: actions/upload-artifact@v4
         with:
-          name: kernel-image
-          path: out/arch/arm64/boot/Image.gz-dtb
+          name: kernel-sm-g770f
+          path: kernel/out/kernel-sm-g770f.tar.gz
