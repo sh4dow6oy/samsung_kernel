@@ -22,30 +22,19 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential clang make git bc bison flex libssl-dev libncurses5-dev libelf-dev wget tar
 
-      # 3️⃣ Setup Proton Clang toolchain (modern)
-      - name: Setup Proton Clang toolchain
-        run: |
-          TOOLCHAIN_PATH="$PWD/toolchain/clang"
-          mkdir -p "$TOOLCHAIN_PATH"
-          wget -O proton-clang.tar.xz "https://github.com/kdrag0n/proton-clang/releases/download/16.0.0/clang-r481631b.tar.xz"
-          tar -xf proton-clang.tar.xz -C "$TOOLCHAIN_PATH"
-          echo "PATH=$TOOLCHAIN_PATH/clang-r481631b/bin:$PATH" >> $GITHUB_ENV
-          echo "CC=clang" >> $GITHUB_ENV
-          echo "LLVM toolchain ready"
-
-      # 4️⃣ Clean output folder
+      # 3️⃣ Clean output folder
       - name: Clean output folder
         run: rm -rf out
 
-      # 5️⃣ Configure kernel using g770f_defconfig
+      # 4️⃣ Configure kernel using g770f_defconfig
       - name: Configure kernel
-        run: make O=out ARCH=arm64 g770f_defconfig CC=$CC
+        run: make O=out ARCH=arm64 g770f_defconfig CC=clang
 
-      # 6️⃣ Build kernel
+      # 5️⃣ Build kernel
       - name: Build kernel
-        run: make O=out ARCH=arm64 CC=$CC -j$(nproc)
+        run: make O=out ARCH=arm64 CC=clang -j$(nproc)
 
-      # 7️⃣ Package kernel + dtb + modules
+      # 6️⃣ Package kernel + dtb + modules
       - name: Package kernel
         run: |
           mkdir -p package
@@ -57,7 +46,7 @@ jobs:
           tar -czvf kernel-sm-g770f.tar.gz -C package .
         working-directory: ./kernel
 
-      # 8️⃣ Upload packaged kernel
+      # 7️⃣ Upload packaged kernel
       - name: Upload packaged kernel
         uses: actions/upload-artifact@v4
         with:
