@@ -1,4 +1,4 @@
-name: Build Samsung Kernel (SM-G770F)
+name: Build Samsung Kernel
 
 on:
   workflow_dispatch:
