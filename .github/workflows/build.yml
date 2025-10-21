@@ -1,4 +1,4 @@
-name: Build Samsung SM-G770F Kernel
+name: Build Android Kernel
 
 on:
   workflow_dispatch:
@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1️⃣ Checkout kernel source
+      # 1️⃣ Checkout source
       - name: Checkout kernel source
         uses: actions/checkout@v3
         with:
@@ -21,14 +21,15 @@ jobs:
           ref: SM-G770F
           submodules: recursive
 
-      # 2️⃣ Install build dependencies
+      # 2️⃣ Install dependencies
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential clang make git bc bison flex \
-            libssl-dev libncurses5-dev libelf-dev wget unzip tar xz-utils
+          sudo apt-get install -y \
+            build-essential bc bison flex libssl-dev libncurses5-dev \
+            libelf-dev git wget tar clang lld llvm
 
-      # 3️⃣ Setup Clang toolchain (r383902b)
+      # 3️⃣ Setup Clang toolchain
       - name: Setup Clang toolchain (r383902b)
         run: |
           TOOLCHAIN_PATH="$PWD/toolchain/clang"
@@ -36,4 +37,54 @@ jobs:
           echo "⬇️ Downloading Clang r383902b..."
           wget -O clang-r383902b.tar.gz "https://github.com/ravindu644/Android-Kernel-Tutorials/releases/download/toolchains/clang-r383902b.tar.gz"
           echo "📦 Extracting..."
-          tar
+          tar -xzf clang-r383902b.tar.gz -C "$TOOLCHAIN_PATH"
+          TOOLCHAIN_BIN=$(find "$TOOLCHAIN_PATH" -type d -name "bin" | head -n1)
+          echo "PATH=$TOOLCHAIN_BIN:$PATH" >> $GITHUB_ENV
+          echo "CC=clang" >> $GITHUB_ENV
+          echo "✅ Clang toolchain setup complete"
+
+      # 4️⃣ Setup GCC cross-compiler (optional for linking)
+      - name: Setup GCC aarch64 cross-compiler
+        run: |
+          GCC_PATH="$PWD/toolchain/gcc"
+          mkdir -p "$GCC_PATH"
+          echo "⬇️ Downloading ARM GCC..."
+          wget -O gcc-aarch64.tar.xz "https://github.com/ravindu644/Android-Kernel-Tutorials/releases/download/toolchains/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu.tar.xz"
+          echo "📦 Extracting..."
+          tar -xJf gcc-aarch64.tar.xz -C "$GCC_PATH"
+          GCC_BIN=$(find "$GCC_PATH" -type d -name "bin" | head -n1)
+          echo "PATH=$GCC_BIN:$PATH" >> $GITHUB_ENV
+          echo "CROSS_COMPILE=aarch64-none-linux-gnu-" >> $GITHUB_ENV
+          echo "✅ GCC toolchain setup complete"
+
+      # 5️⃣ Detect defconfig
+      - name: Detect defconfig
+        id: detect-config
+        run: |
+          MODEL=${{ github.event.inputs.model }}
+          DEFCONFIG=$(ls arch/arm64/configs/*_${MODEL}_defconfig 2>/dev/null || ls arch/arm64/configs/*_defconfig | head -n 1)
+          if [ -z "$DEFCONFIG" ]; then
+            echo "❌ Error: No defconfig found for model $MODEL"
+            exit 1
+          fi
+          echo "✅ Using defconfig: $DEFCONFIG"
+          echo "DEFCONFIG_NAME=$(basename $DEFCONFIG)" >> $GITHUB_OUTPUT
+
+      # 6️⃣ Configure kernel
+      - name: Configure kernel
+        run: |
+          make O=out ARCH=arm64 ${{ steps.detect-config.outputs.DEFCONFIG_NAME }} CC=$CC CROSS_COMPILE=$CROSS_COMPILE
+        working-directory: .
+
+      # 7️⃣ Build kernel
+      - name: Build kernel
+        run: |
+          make O=out ARCH=arm64 CC=$CC CROSS_COMPILE=$CROSS_COMPILE -j$(nproc)
+        working-directory: .
+
+      # 8️⃣ Upload Image
+      - name: Upload kernel image
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-image
+          path: out/arch/arm64/boot/Image.gz-dtb
