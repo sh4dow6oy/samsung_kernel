@@ -48,7 +48,7 @@ jobs:
           GCC_PATH="$PWD/toolchain/gcc-linaro-4.9"
           mkdir -p "$GCC_PATH"
           wget -O gcc-linaro.tar.xz \
-            "https://github.com/sukrut-kelkaarr/gcc-linaro-4.9/releases/download/.../gcc-linaro-4.9.4-2017.01-x86_64_aarch64-linux-gnu.tar.xz"
+            "https://releases.linaro.org/components/toolchain/gcc-linaro/latest-7/gcc-linaro-7.5-2019.12.tar.xz"
           tar -xJf gcc-linaro.tar.xz -C "$GCC_PATH"
           GCC_BIN=$(find "$GCC_PATH" -type d -name "bin" | head -n1)
           echo "PATH=$GCC_BIN:$PATH" >> $GITHUB_ENV
