@@ -50,17 +50,16 @@ jobs:
           echo "CC=clang" >> $GITHUB_ENV
           echo "LD=ld.lld" >> $GITHUB_ENV
 
-      # 🔹 Setup GCC 13.4.0 aarch64 (Termux)
-      - name: Setup GCC 13.4.0 aarch64
+           # 🔹 Setup arter97 ARM64 GCC
+      - name: Setup arter97 ARM64 GCC
         run: |
-          GCC_PATH="$PWD/toolchain/gcc-13.4.0-aarch64"
-          mkdir -p "$GCC_PATH"
-          wget -O gcc-13.4.0-aarch64.tar.bz2 \
-            "https://github.com/termux-user-repository/ndk-toolchain-gcc-13/releases/download/v13.4.0-r0/gcc-13.4.0-aarch64.tar.bz2"
-          tar -xjf gcc-13.4.0-aarch64.tar.bz2 -C "$GCC_PATH"
-          GCC_BIN=$(find "$GCC_PATH" -type d -name "bin" | head -n1)
+          ARTER_GCC_PATH="$PWD/toolchain/arter97-gcc"
+          mkdir -p "$ARTER_GCC_PATH"
+          git clone https://github.com/arter97/arm64-gcc.git "$ARTER_GCC_PATH"
+          GCC_BIN=$(find "$ARTER_GCC_PATH" -type d -name "bin" | head -n1)
           echo "PATH=$GCC_BIN:$PATH" >> $GITHUB_ENV
           echo "CROSS_COMPILE=$GCC_BIN/aarch64-linux-gnu-" >> $GITHUB_ENV
+
 
       # 🔹 Download AOSP core (pentru liblog)
       - name: Clone AOSP core if missing
