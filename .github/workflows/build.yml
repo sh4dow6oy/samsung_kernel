@@ -1,4 +1,4 @@
-name: Build Samsung ARM64 Kernel
+name: Build Kernel
 
 on:
   push:
@@ -10,52 +10,33 @@ jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      BUILD_DIR: ${{ github.workspace }}/kernel_build
-      OUTPUT_DIR: ${{ github.workspace }}/kernel_build/out
-      DEVICE_DEFCONFIG: your_device_defconfig_here # e.g., "exynos_defconfig"
-      KERNEL_BRANCH: main # change to your kernel branch
+      OUTPUT_DIR: out
 
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
+    - name: Checkout code
+      uses: actions/checkout@v3
 
-      - name: Set up dependencies
-        run: |
-          sudo apt update
-          sudo apt install -y git repo bc bison flex libssl-dev make gcc-aarch64-linux-gnu \
-                              binutils-aarch64-linux-gnu clang llvm libncurses-dev ccache python3 python3-distutils || true
+    - name: Set up kernel build environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential libncurses-dev bison flex libssl-dev bc
 
-      - name: Initialize repo
-        run: |
-          mkdir -p $BUILD_DIR
-          cd $BUILD_DIR
-          if [ ! -d ".repo" ]; then
-            repo init -u https://android.googlesource.com/kernel/manifest -b $KERNEL_BRANCH
-          fi
-          repo sync -c -j$(nproc) --no-clone-bundle --no-tags
+    - name: Compile Kernel
+      run: |
+        mkdir -p ${{ env.OUTPUT_DIR }}
+        make O=${{ env.OUTPUT_DIR }} defconfig
+        make -j$(nproc) O=${{ env.OUTPUT_DIR }}
 
-      - name: Build kernel
-        run: |
-          cd $BUILD_DIR
-          export ARCH=arm64
-          export CROSS_COMPILE=aarch64-linux-gnu-
-          export USE_CCACHE=1
-          export CCACHE_DIR=$HOME/.ccache
-          ccache -M 50G || true
+    - name: Prepare artifacts
+      run: |
+        mkdir -p ${{ env.OUTPUT_DIR }}/artifacts
+        cp ${{ env.OUTPUT_DIR }}/arch/arm64/boot/Image ${{ env.OUTPUT_DIR }}/artifacts/
+        cp ${{ env.OUTPUT_DIR }}/arch/arm64/boot/dts/*/*.dtb ${{ env.OUTPUT_DIR }}/artifacts/ || true
+        cd ${{ env.OUTPUT_DIR }}/artifacts
+        zip -r kernel_build.zip *
 
-          # fallback to clang if needed
-          if ! command -v ${CROSS_COMPILE}gcc >/dev/null 2>&1; then
-              echo "GCC not found, using clang"
-              export CROSS_COMPILE=clang
-          fi
-
-          make mrproper || true
-          make clean || true
-          make $DEVICE_DEFCONFIG
-          make -j$(nproc) O=$OUTPUT_DIR
-
-      - name: Upload kernel artifact
-        uses: actions/upload-artifact@v3
-        with:
-          name: kernel-image
-          path: ${{ env.OUTPUT_DIR }}/arch/arm64/boot/Image
+    - name: Upload kernel artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: kernel_build
+        path: ${{ env.OUTPUT_DIR }}/artifacts/kernel_build.zip
