@@ -37,29 +37,34 @@ jobs:
             build-essential git bc bison flex libssl-dev libncurses5-dev \
             libelf-dev wget tar clang lld llvm unzip zip ccache zstd
 
-      # 🔹 Setup Neutron Clang
-      - name: Setup Neutron Clang
+      # 🔹 Setup Proton Clang
+      - name: Setup Proton Clang
         run: |
-          TOOLCHAIN_PATH="$PWD/toolchain/clang"
+          TOOLCHAIN_PATH="$PWD/toolchain/proton-clang"
           mkdir -p "$TOOLCHAIN_PATH"
-          wget -O neutron-clang.tar.zst \
-            "https://github.com/Neutron-Toolchains/clang-build-catalogue/releases/download/10032024/neutron-clang-10032024.tar.zst"
-          tar --use-compress-program=unzstd -xf neutron-clang.tar.zst -C "$TOOLCHAIN_PATH"
-          TOOLCHAIN_BIN="$TOOLCHAIN_PATH/neutron-clang-10032024/bin"
+          wget -O proton-clang.zip "https://github.com/kdrag0n/proton-clang/archive/refs/tags/20210522.zip"
+          unzip proton-clang.zip -d "$TOOLCHAIN_PATH"
+          TOOLCHAIN_BIN="$TOOLCHAIN_PATH/proton-clang-20210522/bin"
           echo "PATH=$TOOLCHAIN_BIN:$PATH" >> $GITHUB_ENV
           echo "CC=clang" >> $GITHUB_ENV
           echo "LD=ld.lld" >> $GITHUB_ENV
+          echo "AR=llvm-ar" >> $GITHUB_ENV
+          echo "NM=llvm-nm" >> $GITHUB_ENV
+          echo "OBJCOPY=llvm-objcopy" >> $GITHUB_ENV
+          echo "OBJDUMP=llvm-objdump" >> $GITHUB_ENV
+          echo "STRIP=llvm-strip" >> $GITHUB_ENV
 
-           # 🔹 Setup arter97 ARM64 GCC
-      - name: Setup arter97 ARM64 GCC
+      # 🔹 Setup GCC 13.4.0 aarch64 (optional, cross-compile)
+      - name: Setup GCC 13.4.0 aarch64
         run: |
-          ARTER_GCC_PATH="$PWD/toolchain/arter97-gcc"
-          mkdir -p "$ARTER_GCC_PATH"
-          git clone https://github.com/arter97/arm64-gcc.git "$ARTER_GCC_PATH"
-          GCC_BIN=$(find "$ARTER_GCC_PATH" -type d -name "bin" | head -n1)
+          GCC_PATH="$PWD/toolchain/gcc-13.4.0-aarch64"
+          mkdir -p "$GCC_PATH"
+          wget -O gcc-13.4.0-aarch64.tar.bz2 \
+            "https://github.com/termux-user-repository/ndk-toolchain-gcc-13/releases/download/v13.4.0-r0/gcc-13.4.0-aarch64.tar.bz2"
+          tar -xjf gcc-13.4.0-aarch64.tar.bz2 -C "$GCC_PATH"
+          GCC_BIN=$(find "$GCC_PATH" -type d -name "bin" | head -n1)
           echo "PATH=$GCC_BIN:$PATH" >> $GITHUB_ENV
           echo "CROSS_COMPILE=$GCC_BIN/aarch64-linux-gnu-" >> $GITHUB_ENV
-
 
       # 🔹 Download AOSP core (pentru liblog)
       - name: Clone AOSP core if missing
