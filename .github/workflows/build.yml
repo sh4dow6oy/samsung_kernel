@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 🔹 Checkout repo complet cu submodule-uri
+      # 🔹 Checkout kernel source
       - name: Checkout kernel source
         uses: actions/checkout@v3
         with:
@@ -22,13 +22,13 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
-      # 🔹 Instalare dependențe
+      # 🔹 Install dependencies
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             build-essential git bc bison flex libssl-dev libncurses5-dev \
-            libelf-dev wget tar unzip zip ccache
+            libelf-dev wget tar clang lld llvm unzip zip ccache zstd
 
       # 🔹 Setup Neutron Clang
       - name: Setup Neutron Clang
@@ -37,13 +37,26 @@ jobs:
           mkdir -p "$TOOLCHAIN_PATH"
           wget -O neutron-clang.tar.zst \
             "https://github.com/Neutron-Toolchains/clang-build-catalogue/releases/download/10032024/neutron-clang-10032024.tar.zst"
-          sudo apt-get install -y zstd
           tar --use-compress-program=unzstd -xf neutron-clang.tar.zst -C "$TOOLCHAIN_PATH"
-          TOOLCHAIN_BIN=$(find "$TOOLCHAIN_PATH" -type d -name "bin" | head -n1)
-          echo "PATH=$TOOLCHAIN_BIN:$PATH" >> $GITHUB_ENV
-          echo "CC=clang" >> $GITHUB_ENV
+          TOOLCHAIN_BIN=$(find "$TOOLCHAIN_PATH" -type f -name "clang" | head -n1 | xargs dirname)
+          LD_BIN=$(find "$TOOLCHAIN_PATH" -type f -name "ld.lld" | head -n1 | xargs dirname)
+          echo "PATH=$TOOLCHAIN_BIN:$LD_BIN:$PATH" >> $GITHUB_ENV
+          echo "CC=$TOOLCHAIN_BIN/clang" >> $GITHUB_ENV
+          echo "LD=$LD_BIN/ld.lld" >> $GITHUB_ENV
 
-      # 🔹 Download AOSP core (pentru liblog)
+      # 🔹 Setup GCC 13.4.0 aarch64
+      - name: Setup GCC 13.4.0 aarch64
+        run: |
+          GCC_PATH="$PWD/toolchain/gcc-13.4.0-aarch64"
+          mkdir -p "$GCC_PATH"
+          wget -O gcc-13.4.0-aarch64.tar.bz2 \
+            "https://github.com/termux-user-repository/ndk-toolchain-gcc-13/releases/download/v13.4.0-r0/gcc-13.4.0-aarch64.tar.bz2"
+          tar -xjf gcc-13.4.0-aarch64.tar.bz2 -C "$GCC_PATH"
+          GCC_BIN=$(find "$GCC_PATH" -type d -name "bin" | head -n1)
+          echo "PATH=$GCC_BIN:$PATH" >> $GITHUB_ENV
+          echo "CROSS_COMPILE=$GCC_BIN/aarch64-linux-gnu-" >> $GITHUB_ENV
+
+      # 🔹 Clone AOSP core (for liblog)
       - name: Clone AOSP core if missing
         run: |
           if [ ! -d "$PWD/aosp/system/core" ]; then
@@ -51,7 +64,7 @@ jobs:
             git clone https://android.googlesource.com/platform/system/core aosp/system/core
           fi
 
-      # 🔹 Detect defconfig pentru modelul specificat
+      # 🔹 Detect defconfig
       - name: Detect defconfig
         id: detect-config
         run: |
@@ -63,14 +76,14 @@ jobs:
           fi
           echo "DEFCONFIG_NAME=$(basename $DEFCONFIG)" >> $GITHUB_OUTPUT
 
-      # 🔹 Curăță directorul de build
+      # 🔹 Clean output directory
       - name: Clean output directory
         run: rm -rf out
 
       # 🔹 Configure kernel
       - name: Configure kernel
         run: |
-          make O=out ARCH=arm64 ${{ steps.detect-config.outputs.DEFCONFIG_NAME }} CC=$CC
+          make O=out ARCH=arm64 ${{ steps.detect-config.outputs.DEFCONFIG_NAME }} CC=$CC CROSS_COMPILE=$CROSS_COMPILE
 
       # 🔹 Patch kernel config (disable stack protector)
       - name: Patch kernel config
@@ -84,8 +97,9 @@ jobs:
       - name: Build kernel
         run: |
           make O=out ARCH=arm64 \
-            CC=clang \
-            LD=ld.lld \
+            CC=$CC \
+            LD=$LD \
+            CROSS_COMPILE=$CROSS_COMPILE \
             KCFLAGS="-fno-stack-protector" \
             KBUILD_CFLAGS="-fno-stack-protector" \
             KBUILD_CFLAGS_MODULE="-fno-stack-protector" \
