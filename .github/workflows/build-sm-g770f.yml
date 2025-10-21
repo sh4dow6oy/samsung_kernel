@@ -1,10 +1,10 @@
-name: Build Samsung Kernel
+name: Build Samsung Kernel (SM-G770F)
 
 on:
   workflow_dispatch:
     inputs:
       model:
-        description: 'Device model (e.g., g770f)'
+        description: "Device model (e.g., g770f)"
         required: true
         default: g770f
 
@@ -35,28 +35,36 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential git bc bison flex libssl-dev libncurses5-dev \
-            libelf-dev wget tar unzip zip ccache zstd
+            libelf-dev wget tar xz-utils ccache lld llvm unzip zip zstd
 
-            # 🔹 Setup prebuilt LLVM/Clang (via llvm-project release)
-      - name: Setup LLVM/Clang from llvm-project Release
+      # 🔹 Setup Android Clang (from android.googlesource.com)
+      - name: Setup Android Clang toolchain
         run: |
           TOOLCHAIN_PATH="$PWD/toolchain/clang"
           mkdir -p "$TOOLCHAIN_PATH"
-          wget -O clang.tar.xz "https://release-assets.githubusercontent.com/github-production-release-asset/75821432/804075b7-4bee-405c-b0f4-09f0caf48078?sp=r&sv=2018-11-09&sr=b&spr=https&se=2025-10-21T12%3A19%3A26Z&rscd=attachment%3B+filename%3Dclang%2Bllvm-15.0.6-x86_64-linux-gnu-ubuntu-18.04.tar.xz&rsct=application%2Foctet-stream&skoid=96c2d410-5711-43a1-aedd-ab1947aa7ab0&sktid=398a6654-997b-47e9-b12b-9515b896b4de&skt=2025-10-21T11%3A18%3A28Z&ske=2025-10-21T12%3A19%3A26Z&sks=b&skv=2018-11-09&sig=atEey3ydCFAk7hSdyF%2Byh0jW8eax23KBIM%2F2oGFVNcQ%3D&jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmVsZWFzZS1hc3NldHMuZ2l0aHVidXNlcmNvbnRlbnQuY29tIiwia2V5Ijoia2V5MSIsImV4cCI6MTc2MTA0OTE4NiwibmJmIjoxNzYxMDQ1NTg2LCJwYXRoIjoicmVsZWFzZWFzc2V0cHJvZHVjdGlvbi5ibG9iLmNvcmUud2luZG93cy5uZXQifQ.aUNyutlCW_rg7OFiF3rD2mbZQDRPfo2Gl3uphFe1Lk4&response-content-disposition=attachment%3B%20filename%3Dclang%2Bllvm-15.0.6-x86_64-linux-gnu-ubuntu-18.04.tar.xz&response-content-type=application%2Foctet-stream"
-          tar -xf clang.tar.xz -C "$TOOLCHAIN_PATH"
-          TOOLCHAIN_BIN=$(find "$TOOLCHAIN_PATH" -type d -name "bin" | head -n1)
+          cd "$TOOLCHAIN_PATH"
+          # Latest Android Clang (Android 15 / r530567)
+          wget -O clang-r530567.tar.gz https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r530567.tar.gz
+          tar -xzf clang-r530567.tar.gz
+          TOOLCHAIN_BIN="$TOOLCHAIN_PATH/bin"
           echo "PATH=$TOOLCHAIN_BIN:$PATH" >> $GITHUB_ENV
-          echo "CC=$TOOLCHAIN_BIN/clang" >> $GITHUB_ENV
-          echo "LD=$TOOLCHAIN_BIN/ld.lld" >> $GITHUB_ENV
-          echo "AR=$TOOLCHAIN_BIN/llvm-ar" >> $GITHUB_ENV
-          echo "NM=$TOOLCHAIN_BIN/llvm-nm" >> $GITHUB_ENV
-          echo "OBJCOPY=$TOOLCHAIN_BIN/llvm-objcopy" >> $GITHUB_ENV
-          echo "OBJDUMP=$TOOLCHAIN_BIN/llvm-objdump" >> $GITHUB_ENV
-          echo "STRIP=$TOOLCHAIN_BIN/llvm-strip" >> $GITHUB_ENV
-          echo "CROSS_COMPILE=$TOOLCHAIN_BIN/aarch64-linux-gnu-" >> $GITHUB_ENV
+          echo "CC=clang" >> $GITHUB_ENV
+          echo "LD=ld.lld" >> $GITHUB_ENV
+
+            # 🔹 Setup GCC 12.2 aarch64
+      - name: Setup Arm GCC 12.2.0 aarch64
+        run: |
+          GCC_PATH="$PWD/toolchain/gcc-12.2.0"
+          mkdir -p "$GCC_PATH"
+          wget -O gcc-12.2.0.tar.xz https://developer.arm.com/downloads/-/arm-gnu-toolchain-downloads/12-2-rel1
+          tar -xvJf gcc-12.2.0.tar.xz -C "$GCC_PATH" --strip-components=1
+          GCC_BIN="$GCC_PATH/bin"
+          echo "PATH=$GCC_BIN:$PATH" >> $GITHUB_ENV
+          echo "CROSS_COMPILE=$GCC_BIN/aarch64-linux-gnu-" >> $GITHUB_ENV
 
 
-      # 🔹 Download AOSP core (pentru liblog)
+
+      # 🔹 Clone AOSP core (for liblog)
       - name: Clone AOSP core if missing
         run: |
           if [ ! -d "$PWD/aosp/system/core" ]; then
@@ -97,9 +105,9 @@ jobs:
       - name: Build kernel
         run: |
           make O=out ARCH=arm64 \
-            CC=$CC \
+            CC=clang \
             CROSS_COMPILE=$CROSS_COMPILE \
-            LD=$LD \
+            LD=ld.lld \
             KCFLAGS="-fno-stack-protector" \
             KBUILD_CFLAGS="-fno-stack-protector" \
             KBUILD_CFLAGS_MODULE="-fno-stack-protector" \
