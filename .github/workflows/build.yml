@@ -28,21 +28,23 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential git bc bison flex libssl-dev libncurses5-dev \
-            libelf-dev wget tar zstd unzip zip ccache
+            libelf-dev wget tar unzip zip ccache
 
-      # 🔹 Setup Neutron Clang 10032024
+      # 🔹 Setup Neutron Clang
       - name: Setup Neutron Clang
         run: |
-          TOOLCHAIN_PATH="$PWD/toolchain/neutron-clang-10032024"
+          TOOLCHAIN_PATH="$PWD/toolchain/neutron-clang"
           mkdir -p "$TOOLCHAIN_PATH"
-          wget -O neutron-clang-10032024.tar.zst \
+          wget -O neutron-clang.tar.zst \
             "https://github.com/Neutron-Toolchains/clang-build-catalogue/releases/download/10032024/neutron-clang-10032024.tar.zst"
-          tar -I zstd -xvf neutron-clang-10032024.tar.zst -C "$TOOLCHAIN_PATH"
+          # Install zstd if not present
+          sudo apt-get install -y zstd
+          tar --use-compress-program=unzstd -xf neutron-clang.tar.zst -C "$TOOLCHAIN_PATH"
           TOOLCHAIN_BIN=$(find "$TOOLCHAIN_PATH" -type d -name "bin" | head -n1)
           echo "PATH=$TOOLCHAIN_BIN:$PATH" >> $GITHUB_ENV
           echo "CC=clang" >> $GITHUB_ENV
 
-      # 🔹 Setup GCC 13.4.0 aarch64 (Termux)
+      # 🔹 Setup GCC 13.4.0 aarch64
       - name: Setup GCC 13.4.0 aarch64
         run: |
           GCC_PATH="$PWD/toolchain/gcc-13.4.0-aarch64"
@@ -97,7 +99,6 @@ jobs:
           make O=out ARCH=arm64 \
             CC=clang \
             CROSS_COMPILE=$CROSS_COMPILE \
-            LD=ld.lld \
             KCFLAGS="-fno-stack-protector" \
             KBUILD_CFLAGS="-fno-stack-protector" \
             KBUILD_CFLAGS_MODULE="-fno-stack-protector" \
