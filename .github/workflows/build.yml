@@ -43,7 +43,7 @@ jobs:
           echo "CC=clang" >> $GITHUB_ENV
 
        # 🔹 Setup GCC 13.4.0 aarch64 (Termux)
-       - name: Setup GCC 13.4.0 aarch64
+      - name: Setup GCC 13.4.0 aarch64
         run: |
           GCC_PATH="$PWD/toolchain/gcc-13.4.0-aarch64"
           mkdir -p "$GCC_PATH"
