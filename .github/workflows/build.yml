@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1️⃣ Checkout source
+      # 1️⃣ Checkout kernel repository
       - name: Checkout kernel source
         uses: actions/checkout@v3
         with:
@@ -26,36 +26,36 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            build-essential bc bison flex libssl-dev libncurses5-dev \
-            libelf-dev git wget tar clang lld llvm
+            build-essential git bc bison flex libssl-dev libncurses5-dev \
+            libelf-dev wget tar clang lld llvm
 
-      # 3️⃣ Setup Clang toolchain
-      - name: Setup Clang toolchain (r383902b)
+      # 3️⃣ Setup Clang r416183b (AOSP)
+      - name: Setup Clang toolchain (r416183b)
         run: |
           TOOLCHAIN_PATH="$PWD/toolchain/clang"
           mkdir -p "$TOOLCHAIN_PATH"
-          echo "⬇️ Downloading Clang r383902b..."
-          wget -O clang-r383902b.tar.gz "https://github.com/ravindu644/Android-Kernel-Tutorials/releases/download/toolchains/clang-r383902b.tar.gz"
-          echo "📦 Extracting..."
-          tar -xzf clang-r383902b.tar.gz -C "$TOOLCHAIN_PATH"
+          echo "⬇️ Downloading Clang r416183b from AOSP..."
+          wget -O clang-r416183b.tar.gz \
+            "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/bd96dfe349c962681f0e5388af874c771ef96670/clang-r416183b.tar.gz"
+          tar -xzf clang-r416183b.tar.gz -C "$TOOLCHAIN_PATH"
           TOOLCHAIN_BIN=$(find "$TOOLCHAIN_PATH" -type d -name "bin" | head -n1)
           echo "PATH=$TOOLCHAIN_BIN:$PATH" >> $GITHUB_ENV
           echo "CC=clang" >> $GITHUB_ENV
-          echo "✅ Clang toolchain setup complete"
+          echo "✅ Clang r416183b setup complete"
 
-      # 4️⃣ Setup GCC cross-compiler (optional for linking)
+      # 4️⃣ Setup GCC cross compiler (ARM64)
       - name: Setup GCC aarch64 cross-compiler
         run: |
           GCC_PATH="$PWD/toolchain/gcc"
           mkdir -p "$GCC_PATH"
-          echo "⬇️ Downloading ARM GCC..."
-          wget -O gcc-aarch64.tar.xz "https://github.com/ravindu644/Android-Kernel-Tutorials/releases/download/toolchains/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu.tar.xz"
-          echo "📦 Extracting..."
+          echo "⬇️ Downloading ARM GCC 14.2..."
+          wget -O gcc-aarch64.tar.xz \
+            "https://github.com/ravindu644/Android-Kernel-Tutorials/releases/download/toolchains/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu.tar.xz"
           tar -xJf gcc-aarch64.tar.xz -C "$GCC_PATH"
           GCC_BIN=$(find "$GCC_PATH" -type d -name "bin" | head -n1)
           echo "PATH=$GCC_BIN:$PATH" >> $GITHUB_ENV
           echo "CROSS_COMPILE=aarch64-none-linux-gnu-" >> $GITHUB_ENV
-          echo "✅ GCC toolchain setup complete"
+          echo "✅ GCC 14.2 toolchain ready"
 
       # 5️⃣ Detect defconfig
       - name: Detect defconfig
@@ -67,22 +67,32 @@ jobs:
             echo "❌ Error: No defconfig found for model $MODEL"
             exit 1
           fi
-          echo "✅ Using defconfig: $DEFCONFIG"
           echo "DEFCONFIG_NAME=$(basename $DEFCONFIG)" >> $GITHUB_OUTPUT
+          echo "✅ Using defconfig: $DEFCONFIG"
 
-      # 6️⃣ Configure kernel
+      # 6️⃣ Clean output directory
+      - name: Clean output directory
+        run: rm -rf out
+
+      # 7️⃣ Configure kernel
       - name: Configure kernel
         run: |
           make O=out ARCH=arm64 ${{ steps.detect-config.outputs.DEFCONFIG_NAME }} CC=$CC CROSS_COMPILE=$CROSS_COMPILE
         working-directory: .
 
-      # 7️⃣ Build kernel
+      # 8️⃣ Build kernel with Clang + GCC
       - name: Build kernel
         run: |
-          make O=out ARCH=arm64 CC=$CC CROSS_COMPILE=$CROSS_COMPILE -j$(nproc)
+          echo "🏗️ Starting kernel build..."
+          make O=out ARCH=arm64 \
+            CC=clang \
+            CROSS_COMPILE=$CROSS_COMPILE \
+            LD=ld.lld \
+            KCFLAGS="-fno-stack-protector" \
+            -j$(nproc)
         working-directory: .
 
-      # 8️⃣ Upload Image
+      # 9️⃣ Upload kernel image
       - name: Upload kernel image
         uses: actions/upload-artifact@v4
         with:
