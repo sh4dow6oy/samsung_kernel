@@ -22,6 +22,13 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
+      # 🔹 Add upstream not_r8q
+      - name: Add not_r8q upstream
+        run: |
+          git remote add upstream https://github.com/skye-tachyon/not_r8q.git
+          git fetch upstream
+          git merge upstream/main --allow-unrelated-histories -m "Merge not_r8q upstream" || echo "Merge conflicts? Resolve manually"
+
       # 🔹 Install dependencies
       - name: Install dependencies
         run: |
