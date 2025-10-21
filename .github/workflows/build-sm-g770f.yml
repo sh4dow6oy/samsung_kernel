@@ -1,137 +1,112 @@
-name: Build SM-G770F kernel and boot image
+name: Build Samsung Kernel (SM-G770F)
 
 on:
   workflow_dispatch:
     inputs:
-      ramdisk_url:
-        description: 'Public URL to stock ramdisk.img (optional). If omitted, only kernel artifacts are produced.'
-        required: false
-        default: ''
-      defconfig:
-        description: 'Defconfig name to use (in arch/arm64/configs).'
-        required: false
-        default: 'G770F_defconfig'
-      base:
-        description: 'Kernel base address (hex), e.g. 0x10000000'
-        required: false
-        default: '0x10000000'
-      pagesize:
-        description: 'Flash page size (decimal), e.g. 4096'
-        required: false
-        default: '4096'
-      cmdline:
-        description: 'Kernel cmdline to use in mkbootimg (quoted).'
-        required: false
-        default: 'console=ttyS0,115200n8 androidboot.hardware=samsung'
-  push:
-    branches:
-      - SM-G770F
+      model:
+        description: 'Device model (e.g., g770f)'
+        required: true
+        default: g770f
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      ARCH: arm64
-      CROSS_COMPILE: aarch64-linux-gnu-
-      OUT: out
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          ref: SM-G770F
 
-      - name: Install packages
+    steps:
+      # 🔹 Checkout kernel source
+      - name: Checkout kernel source
+        uses: actions/checkout@v3
+        with:
+          repository: sh4dow6oy/samsung_kernel
+          ref: SM-G770F
+          submodules: recursive
+          fetch-depth: 0
+
+      # 🔹 Add upstream not_r8q
+      - name: Add not_r8q upstream
+        run: |
+          git remote add upstream https://github.com/skye-tachyon/not_r8q.git
+          git fetch upstream
+          git merge upstream/main --allow-unrelated-histories -m "Merge not_r8q upstream" || echo "Merge conflicts? Resolve manually"
+
+      # 🔹 Install dependencies
+      - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y git build-essential bc bison flex libssl-dev libncurses-dev libelf-dev device-tree-compiler lz4 python3 python3-pip curl
+          sudo apt-get install -y \
+            build-essential git bc bison flex libssl-dev libncurses5-dev \
+            libelf-dev wget tar unzip zip ccache zstd
 
-      - name: Install cross toolchain (Linaro)
+      # 🔹 Setup prebuilt LLVM/Clang (fast)
+      - name: Setup prebuilt LLVM/Clang
         run: |
-          mkdir -p $HOME/toolchains
-          cd $HOME/toolchains
-          TOOLCHAIN_TAR=gcc-linaro-7.5.0-2019.12-x86_64_aarch64-linux-gnu.tar.xz
-          if [ ! -d "$HOME/toolchains/gcc-linaro" ]; then
-            curl -sSL -O https://releases.linaro.org/components/toolchain/binaries/latest-7/aarch64/${TOOLCHAIN_TAR}
-            tar xf ${TOOLCHAIN_TAR}
-            mv gcc-linaro-* gcc-linaro || true
+          mkdir -p toolchain/clang
+          wget -O toolchain/clang/clang.tar.xz \
+            "https://github.com/llvm/llvm-project/releases/download/llvmorg-17.0.7/clang+llvm-17.0.7-x86_64-linux-gnu-ubuntu-20.04.tar.xz"
+          tar -xf toolchain/clang/clang.tar.xz -C toolchain/clang
+          LLVM_BIN=$(find toolchain/clang -type d -name "bin" | head -n1)
+          echo "PATH=$LLVM_BIN:$PATH" >> $GITHUB_ENV
+          echo "CC=$LLVM_BIN/clang" >> $GITHUB_ENV
+          echo "LD=$LLVM_BIN/ld.lld" >> $GITHUB_ENV
+          echo "AR=$LLVM_BIN/llvm-ar" >> $GITHUB_ENV
+          echo "NM=$LLVM_BIN/llvm-nm" >> $GITHUB_ENV
+          echo "OBJCOPY=$LLVM_BIN/llvm-objcopy" >> $GITHUB_ENV
+          echo "OBJDUMP=$LLVM_BIN/llvm-objdump" >> $GITHUB_ENV
+          echo "STRIP=$LLVM_BIN/llvm-strip" >> $GITHUB_ENV
+          echo "CROSS_COMPILE=$LLVM_BIN/aarch64-linux-gnu-" >> $GITHUB_ENV
+
+      # 🔹 Download AOSP core (pentru liblog)
+      - name: Clone AOSP core if missing
+        run: |
+          if [ ! -d "$PWD/aosp/system/core" ]; then
+            mkdir -p aosp
+            git clone https://android.googlesource.com/platform/system/core aosp/system/core
           fi
-          echo "$HOME/toolchains/gcc-linaro/bin" >> $GITHUB_PATH
 
-      - name: Show defconfig input
-        run: echo "Using defconfig: ${{ github.event.inputs.defconfig }}"
-
-      - name: Prepare build output & run defconfig
+      # 🔹 Detect defconfig
+      - name: Detect defconfig
+        id: detect-config
         run: |
-          mkdir -p ${OUT}
-          make O=${OUT} ARCH=${ARCH} ${{ github.event.inputs.defconfig }}
-
-      - name: Build kernel, dtbs and modules
-        run: make -j$(nproc) O=${OUT} ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE}
-
-      - name: Collect kernel artifacts
-        run: |
-          mkdir -p artifacts/kernel
-          cp -v ${OUT}/arch/arm64/boot/Image* artifacts/kernel/ || true
-          cp -v ${OUT}/arch/arm64/boot/dts/*.dtb artifacts/kernel/ || true
-          tar -czf artifacts/kernel/kernel_artifacts.tar.gz -C artifacts/kernel .
-
-      - name: Download ramdisk if given
-        if: ${{ github.event.inputs.ramdisk_url != '' }}
-        run: |
-          echo "Downloading ramdisk from ${{ github.event.inputs.ramdisk_url }}"
-          curl -fsSL "${{ github.event.inputs.ramdisk_url }}" -o ramdisk.img
-          ls -lh ramdisk.img
-
-      - name: Create boot image (if ramdisk present)
-        if: ${{ github.event.inputs.ramdisk_url != '' }}
-        run: |
-          mkdir -p artifacts/boot
-          if [ ! -f ./mkbootimg.py ]; then
-            cat > mkbootimg.py <<'PY'
-#!/usr/bin/env python3
-import argparse,struct,os
-ANDROID_MAGIC=b'ANDROID!'
-def align_size(size,page): return ((size+page-1)//page)*page
-def build_header(k_sz,r_sz,dt_sz,page,base,name,cmdline):
-  kernel_addr=base+0x00008000; ramdisk_addr=base+0x01000000; tags_addr=base+0x00000100
-  fmt='<8s10I16s512s32s'
-  name_b=name.encode('ascii')[:15]+b'\x00'*(16-min(len(name),16))
-  cmd_b=cmdline.encode('ascii')[:511]+b'\x00'*(512-min(len(cmdline),512))
-  id_b=b'\x00'*32
-  return struct.pack(fmt,ANDROID_MAGIC,k_sz,kernel_addr,r_sz,ramdisk_addr,0,0,tags_addr,page,dt_sz,0,name_b,cmd_b,id_b)
-def main():
-  p=argparse.ArgumentParser(); p.add_argument('--kernel',required=True); p.add_argument('--ramdisk',required=True)
-  p.add_argument('--dtb',default=None); p.add_argument('--base',required=True); p.add_argument('--pagesize',type=int,required=True)
-  p.add_argument('--cmdline',default=''); p.add_argument('--name',default=''); p.add_argument('--output',required=True)
-  args=p.parse_args(); base=int(args.base,0); page=args.pagesize
-  k=open(args.kernel,'rb').read(); r=open(args.ramdisk,'rb').read(); dt=b''
-  if args.dtb: dt=open(args.dtb,'rb').read()
-  hdr=build_header(len(k),len(r),len(dt),page,base,args.name,args.cmdline)
-  def pad(b,p): return b + (b'\x00'*((p-(len(b)%p))%p))
-  with open(args.output,'wb') as out:
-    out.write(pad(hdr,page)); out.write(k); out.write(b'\x00'*((align_size(len(k),page)-len(k))))
-    out.write(r); out.write(b'\x00'*((align_size(len(r),page)-len(r))))
-    if dt: out.write(dt); out.write(b'\x00'*((align_size(len(dt),page)-len(dt))))
-  print("Created",args.output)
-if __name__=='__main__': main()
-PY
-            chmod +x mkbootimg.py
+          MODEL=${{ github.event.inputs.model }}
+          DEFCONFIG=$(ls arch/arm64/configs/*_${MODEL}_defconfig 2>/dev/null || ls arch/arm64/configs/*_defconfig | head -n1)
+          if [ -z "$DEFCONFIG" ]; then
+            echo "❌ No defconfig found for model $MODEL"
+            exit 1
           fi
-          if [ -f ${OUT}/arch/arm64/boot/Image.gz-dtb ]; then
-            KIMG=${OUT}/arch/arm64/boot/Image.gz-dtb
-          elif [ -f ${OUT}/arch/arm64/boot/Image ]; then
-            KIMG=${OUT}/arch/arm64/boot/Image
-          else
-            echo "Kernel image not found in ${OUT}/arch/arm64/boot"; exit 1
-          fi
-          python3 mkbootimg.py --kernel "$KIMG" --ramdisk ramdisk.img --base "${{ github.event.inputs.base }}" --pagesize ${{ github.event.inputs.pagesize }} --cmdline "${{ github.event.inputs.cmdline }}" --output artifacts/boot/boot_custom.img
-          ls -lh artifacts/boot/boot_custom.img
+          echo "DEFCONFIG_NAME=$(basename $DEFCONFIG)" >> $GITHUB_OUTPUT
 
-      - name: Upload artifacts
+      # 🔹 Clean output directory
+      - name: Clean output directory
+        run: rm -rf out
+
+      # 🔹 Configure kernel
+      - name: Configure kernel
+        run: |
+          make O=out ARCH=arm64 ${{ steps.detect-config.outputs.DEFCONFIG_NAME }} CC=$CC CROSS_COMPILE=$CROSS_COMPILE
+
+      # 🔹 Patch kernel config (disable stack protector)
+      - name: Patch kernel config
+        run: |
+          sed -i 's/CONFIG_CC_STACKPROTECTOR_STRONG=y/# CONFIG_CC_STACKPROTECTOR_STRONG is not set/g' out/.config || true
+          sed -i 's/CONFIG_CC_STACKPROTECTOR=y/# CONFIG_CC_STACKPROTECTOR is not set/g' out/.config || true
+          echo "CONFIG_CC_STACKPROTECTOR_NONE=y" >> out/.config
+          make O=out ARCH=arm64 olddefconfig
+
+      # 🔹 Build kernel
+      - name: Build kernel
+        run: |
+          make O=out ARCH=arm64 \
+            CC=$CC \
+            CROSS_COMPILE=$CROSS_COMPILE \
+            LD=$LD \
+            KCFLAGS="-fno-stack-protector" \
+            KBUILD_CFLAGS="-fno-stack-protector" \
+            KBUILD_CFLAGS_MODULE="-fno-stack-protector" \
+            -j$(nproc)
+
+      # 🔹 Upload kernel artifacts
+      - name: Upload kernel image
         uses: actions/upload-artifact@v4
         with:
-          name: kernel_and_boot
-          path: |
-            artifacts/kernel/kernel_artifacts.tar.gz
-            artifacts/boot/boot_custom.img
+          name: kernel-image
+          path: out/arch/arm64/boot/Image.gz-dtb
