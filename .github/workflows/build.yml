@@ -1,92 +1,118 @@
-name: Build SM-G770F Kernel
+name: Build Samsung Kernel (SM-G770F)
 
 on:
   workflow_dispatch:
     inputs:
-      ramdisk_url:
-        description: 'Public URL to stock ramdisk.img (optional)'
-        required: false
-        default: ''
-      withKernelSU:
-        description: 'Apply KernelSU (true/false)'
-        required: false
-        default: 'false'
+      model:
+        description: 'Device model (e.g., g770f)'
+        required: true
+        default: g770f
+
+env:
+  ARCH: arm64
+  OUT: out
+  PATH: ${{ github.workspace }}/toolchain/clang/bin:${{ github.workspace }}/toolchain/gcc/bin:$PATH
+  CC: clang
+  CROSS_COMPILE: aarch64-none-linux-gnu-
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      ARCH: arm64
-      CROSS_COMPILE: aarch64-linux-gnu-
-      OUT: out
+
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
+      - name: Checkout kernel source
+        uses: actions/checkout@v3
+        with:
+          repository: sh4dow6oy/samsung_kernel
+          ref: SM-G770F
+          submodules: recursive
 
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y git build-essential bc bison flex libssl-dev libncurses-dev libelf-dev python3 python3-pip curl zip unzip
+          sudo apt-get install -y \
+            build-essential git bc bison flex libssl-dev libncurses5-dev \
+            libelf-dev wget tar clang lld llvm zip unzip
 
-      - name: Setup toolchain (Linaro)
+      - name: Setup Clang r416183b (AOSP)
         run: |
-          mkdir -p $HOME/toolchains && cd $HOME/toolchains
-          TOOLCHAIN_TAR=gcc-linaro-7.5.0-2019.12-x86_64_aarch64-linux-gnu.tar.xz
-          if [ ! -d gcc-linaro ]; then
-            curl -LO https://releases.linaro.org/components/toolchain/binaries/latest-7/aarch64/${TOOLCHAIN_TAR}
-            tar xf ${TOOLCHAIN_TAR}
-            mv gcc-linaro-* gcc-linaro
+          TOOLCHAIN_PATH="$PWD/toolchain/clang"
+          mkdir -p "$TOOLCHAIN_PATH"
+          wget -O clang-r416183b.tar.gz \
+            "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/bd96dfe349c962681f0e5388af874c771ef96670/clang-r416183b.tar.gz"
+          tar -xzf clang-r416183b.tar.gz -C "$TOOLCHAIN_PATH"
+
+      - name: Setup GCC aarch64 cross-compiler
+        run: |
+          GCC_PATH="$PWD/toolchain/gcc"
+          mkdir -p "$GCC_PATH"
+          wget -O gcc-aarch64.tar.xz \
+            "https://github.com/ravindu644/Android-Kernel-Tutorials/releases/download/toolchains/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu.tar.xz"
+          tar -xJf gcc-aarch64.tar.xz -C "$GCC_PATH"
+
+      - name: Detect defconfig
+        id: detect-config
+        run: |
+          MODEL=${{ github.event.inputs.model }}
+          DEFCONFIG=$(ls arch/arm64/configs/*_${MODEL}_defconfig 2>/dev/null || ls arch/arm64/configs/*_defconfig | head -n 1)
+          if [ -z "$DEFCONFIG" ]; then
+            echo "❌ No defconfig found for $MODEL"
+            exit 1
           fi
-          echo "$HOME/toolchains/gcc-linaro/bin" >> $GITHUB_PATH
+          echo "DEFCONFIG_NAME=$(basename $DEFCONFIG)" >> $GITHUB_OUTPUT
 
-      - name: Show defconfig
-        run: echo "Using defconfig: G770F_defconfig"
+      - name: Clean output directory
+        run: rm -rf out
 
-      - name: Prepare build
+      - name: Configure kernel
         run: |
-          mkdir -p ${OUT}
-          make O=${OUT} ARCH=${ARCH} G770F_defconfig
+          make O=out ARCH=${ARCH} ${{ steps.detect-config.outputs.DEFCONFIG_NAME }}
 
-      - name: Apply KernelSU
-        if: ${{ github.event.inputs.withKernelSU == 'true' }}
+      - name: Patch kernel config
         run: |
-          curl -LSs https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh | bash -s main
-          echo -e "CONFIG_KPROBES=y\nCONFIG_HAVE_KPROBES=y\nCONFIG_KPROBE_EVENTS=y" >> arch/arm64/configs/G770F_defconfig
+          sed -i 's/CONFIG_CC_STACKPROTECTOR_STRONG=y/# CONFIG_CC_STACKPROTECTOR_STRONG is not set/g' out/.config || true
+          sed -i 's/CONFIG_CC_STACKPROTECTOR=y/# CONFIG_CC_STACKPROTECTOR is not set/g' out/.config || true
+          echo "CONFIG_CC_STACKPROTECTOR_NONE=y" >> out/.config
+          make O=out ARCH=${ARCH} olddefconfig
 
       - name: Build kernel
         run: |
-          make -j$(nproc) O=${OUT} ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE}
+          make O=out ARCH=${ARCH} \
+            CC=${CC} CROSS_COMPILE=${CROSS_COMPILE} LD=ld.lld \
+            KCFLAGS="-fno-stack-protector" \
+            KBUILD_CFLAGS="-fno-stack-protector" \
+            KBUILD_CFLAGS_MODULE="-fno-stack-protector" \
+            -j$(nproc)
 
-      - name: Collect artifacts
-        run: |
-          mkdir -p artifacts
-          cp -v ${OUT}/arch/arm64/boot/Image* artifacts/ || true
-          cp -v ${OUT}/arch/arm64/boot/dts/*.dtb artifacts/ || true
-          tar -czf artifacts/kernel_artifacts.tar.gz -C artifacts .
-
-      - name: Download ramdisk
-        if: ${{ github.event.inputs.ramdisk_url != '' }}
-        run: curl -fsSL "${{ github.event.inputs.ramdisk_url }}" -o ramdisk.img
+      - name: Upload kernel artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-artifacts
+          path: |
+            out/arch/arm64/boot/Image
+            out/arch/arm64/boot/Image.gz
+            out/arch/arm64/boot/Image.gz-dtb
+            out/arch/arm64/boot/dtbo.img
 
       - name: Setup AnyKernel3
         run: |
-          git clone --depth=1 https://github.com/tiann/AnyKernel3 AnyKernel3
-          sed -i 's/do.devicecheck=1/do.devicecheck=0/' AnyKernel3/anykernel.sh
-          sed -i 's/is_slot_device=1;/is_slot_device=auto;/' AnyKernel3/anykernel.sh
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git
+          sed -i 's/do.devicecheck=1/do.devicecheck=0/g' AnyKernel3/anykernel.sh
+          sed -i 's/is_slot_device=1;/is_slot_device=auto;/g' AnyKernel3/anykernel.sh
 
-      - name: Create boot image
-        if: ${{ github.event.inputs.ramdisk_url != '' }}
+      - name: Copy kernel to AnyKernel3
         run: |
-          KIMG=${OUT}/arch/arm64/boot/Image
-          cp $KIMG AnyKernel3/
-          cp ramdisk.img AnyKernel3/
-          cd AnyKernel3
-          zip -r ../boot_custom.zip *
+          cp -f out/arch/arm64/boot/Image AnyKernel3/ || true
+          cp -f out/arch/arm64/boot/Image.gz AnyKernel3/ || true
+          cp -f out/arch/arm64/boot/dtbo.img AnyKernel3/ || true
 
-      - name: Upload artifacts
+      - name: Pack AnyKernel3
+        run: |
+          cd AnyKernel3
+          zip -r ../kernel-${{ github.event.inputs.model }}.zip *
+
+      - name: Upload AnyKernel3 zip
         uses: actions/upload-artifact@v4
         with:
-          name: kernel_artifacts
-          path: |
-            artifacts/kernel_artifacts.tar.gz
-            AnyKernel3/boot_custom.zip
+          name: AnyKernel3-${{ github.event.inputs.model }}
+          path: kernel-${{ github.event.inputs.model }}.zip
