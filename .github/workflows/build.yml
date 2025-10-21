@@ -1,15 +1,14 @@
-
-name: Build SM-G770F kernel and boot image
+name: Build SM-G770F Kernel and Boot Image
 
 on:
   workflow_dispatch:
     inputs:
       ramdisk_url:
-        description: 'Public URL to stock ramdisk.img (optional). If omitted, only kernel artifacts are produced.'
+        description: 'Public URL to stock ramdisk.img (optional).'
         required: false
         default: ''
       defconfig:
-        description: 'Defconfig name to use (in arch/arm64/configs).'
+        description: 'Defconfig name to use'
         required: false
         default: 'G770F_defconfig'
       base:
@@ -17,11 +16,11 @@ on:
         required: false
         default: '0x10000000'
       pagesize:
-        description: 'Flash page size (decimal), e.g. 4096'
+        description: 'Flash page size'
         required: false
         default: '4096'
       cmdline:
-        description: 'Kernel cmdline to use in mkbootimg (quoted).'
+        description: 'Kernel cmdline'
         required: false
         default: 'console=ttyS0,115200n8 androidboot.hardware=samsung'
   push:
@@ -31,16 +30,10 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      ARCH: arm64
-      CROSS_COMPILE: aarch64-linux-gnu-
-      OUT: out
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          ref: SM-G770F
 
       - name: Install packages
         run: |
@@ -59,80 +52,28 @@ jobs:
           fi
           echo "$HOME/toolchains/gcc-linaro/bin" >> $GITHUB_PATH
 
-      - name: Show defconfig input
+      - name: Show defconfig
         run: echo "Using defconfig: ${{ github.event.inputs.defconfig }}"
 
-      - name: Prepare build output & run defconfig
+      - name: Build kernel using Makefile
         run: |
-          mkdir -p ${OUT}
-          make O=${OUT} ARCH=${ARCH} ${{ github.event.inputs.defconfig }}
+          make all DEFCONFIG=${{ github.event.inputs.defconfig }}
 
-      - name: Build kernel, dtbs and modules
-        run: make -j$(nproc) O=${OUT} ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE}
-
-      - name: Collect kernel artifacts
-        run: |
-          mkdir -p artifacts/kernel
-          cp -v ${OUT}/arch/arm64/boot/Image* artifacts/kernel/ || true
-          cp -v ${OUT}/arch/arm64/boot/dts/*.dtb artifacts/kernel/ || true
-          tar -czf artifacts/kernel/kernel_artifacts.tar.gz -C artifacts/kernel .
-
-      - name: Download ramdisk if given
+      - name: Download ramdisk if provided
         if: ${{ github.event.inputs.ramdisk_url != '' }}
         run: |
-          echo "Downloading ramdisk from ${{ github.event.inputs.ramdisk_url }}"
           curl -fsSL "${{ github.event.inputs.ramdisk_url }}" -o ramdisk.img
-          ls -lh ramdisk.img
 
-      - name: Create boot image (if ramdisk present)
+      - name: Package boot image (if ramdisk present)
         if: ${{ github.event.inputs.ramdisk_url != '' }}
         run: |
-          mkdir -p artifacts/boot
-          if [ ! -f ./mkbootimg.py ]; then
-            cat > mkbootimg.py <<'PY'
-#!/usr/bin/env python3
-import argparse,struct,os
-ANDROID_MAGIC=b'ANDROID!'
-def align_size(size,page): return ((size+page-1)//page)*page
-def build_header(k_sz,r_sz,dt_sz,page,base,name,cmdline):
-  kernel_addr=base+0x00008000; ramdisk_addr=base+0x01000000; tags_addr=base+0x00000100
-  fmt='<8s10I16s512s32s'
-  name_b=name.encode('ascii')[:15]+b'\x00'*(16-min(len(name),16))
-  cmd_b=cmdline.encode('ascii')[:511]+b'\x00'*(512-min(len(cmdline),512))
-  id_b=b'\x00'*32
-  return struct.pack(fmt,ANDROID_MAGIC,k_sz,kernel_addr,r_sz,ramdisk_addr,0,0,tags_addr,page,dt_sz,0,name_b,cmd_b,id_b)
-def main():
-  p=argparse.ArgumentParser(); p.add_argument('--kernel',required=True); p.add_argument('--ramdisk',required=True)
-  p.add_argument('--dtb',default=None); p.add_argument('--base',required=True); p.add_argument('--pagesize',type=int,required=True)
-  p.add_argument('--cmdline',default=''); p.add_argument('--name',default=''); p.add_argument('--output',required=True)
-  args=p.parse_args(); base=int(args.base,0); page=args.pagesize
-  k=open(args.kernel,'rb').read(); r=open(args.ramdisk,'rb').read(); dt=b''
-  if args.dtb: dt=open(args.dtb,'rb').read()
-  hdr=build_header(len(k),len(r),len(dt),page,base,args.name,args.cmdline)
-  def pad(b,p): return b + (b'\x00'*((p-(len(b)%p))%p))
-  with open(args.output,'wb') as out:
-    out.write(pad(hdr,page)); out.write(k); out.write(b'\x00'*((align_size(len(k),page)-len(k))))
-    out.write(r); out.write(b'\x00'*((align_size(len(r),page)-len(r))))
-    if dt: out.write(dt); out.write(b'\x00'*((align_size(len(dt),page)-len(dt))))
-  print("Created",args.output)
-if __name__=='__main__': main()
-PY
-            chmod +x mkbootimg.py
-          fi
-          if [ -f ${OUT}/arch/arm64/boot/Image.gz-dtb ]; then
-            KIMG=${OUT}/arch/arm64/boot/Image.gz-dtb
-          elif [ -f ${OUT}/arch/arm64/boot/Image ]; then
-            KIMG=${OUT}/arch/arm64/boot/Image
-          else
-            echo "Kernel image not found in ${OUT}/arch/arm64/boot"; exit 1
-          fi
-          python3 mkbootimg.py --kernel "$KIMG" --ramdisk ramdisk.img --base "${{ github.event.inputs.base }}" --pagesize ${{ github.event.inputs.pagesize }} --cmdline "${{ github.event.inputs.cmdline }}" --output artifacts/boot/boot_custom.img
-          ls -lh artifacts/boot/boot_custom.img
+          make package RAMDISK=ramdisk.img BASE=${{ github.event.inputs.base }} PAGESIZE=${{ github.event.inputs.pagesize }} CMDLINE="${{ github.event.inputs.cmdline }}"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: kernel_and_boot
           path: |
-            artifacts/kernel/kernel_artifacts.tar.gz
-            artifacts/boot/boot_custom.img
+            out/arch/arm64/boot/Image*
+            out/arch/arm64/boot/dts/*.dtb
+            boot_custom.img
