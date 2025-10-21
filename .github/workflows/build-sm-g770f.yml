@@ -59,19 +59,6 @@ jobs:
           echo "OBJDUMP=$TOOLCHAIN_BIN/llvm-objdump" >> $GITHUB_ENV
           echo "STRIP=$TOOLCHAIN_BIN/llvm-strip" >> $GITHUB_ENV
           echo "CROSS_COMPILE=$TOOLCHAIN_BIN/aarch64-linux-gnu-" >> $GITHUB_ENV
-"
-          tar -xf clang.tar.xz -C "$TOOLCHAIN_PATH"
-          TOOLCHAIN_BIN=$(find "$TOOLCHAIN_PATH" -type d -name "bin" | head -n1)
-          echo "PATH=$TOOLCHAIN_BIN:$PATH" >> $GITHUB_ENV
-          echo "CC=$TOOLCHAIN_BIN/clang" >> $GITHUB_ENV
-          echo "LD=$TOOLCHAIN_BIN/ld.lld" >> $GITHUB_ENV
-          echo "AR=$TOOLCHAIN_BIN/llvm-ar" >> $GITHUB_ENV
-          echo "NM=$TOOLCHAIN_BIN/llvm-nm" >> $GITHUB_ENV
-          echo "OBJCOPY=$TOOLCHAIN_BIN/llvm-objcopy" >> $GITHUB_ENV
-          echo "OBJDUMP=$TOOLCHAIN_BIN/llvm-objdump" >> $GITHUB_ENV
-          echo "STRIP=$TOOLCHAIN_BIN/llvm-strip" >> $GITHUB_ENV
-          echo "CROSS_COMPILE=$TOOLCHAIN_BIN/aarch64-linux-gnu-" >> $GITHUB_ENV
-
 
 
       # 🔹 Download AOSP core (pentru liblog)
