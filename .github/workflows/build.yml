@@ -51,17 +51,26 @@ jobs:
           echo "CC=clang" >> $GITHUB_ENV
           echo "LD=ld.lld" >> $GITHUB_ENV
 
-      # 🔹 Setup GCC 13.4.0 aarch64 (Termux)
-      - name: Setup GCC 13.4.0 aarch64
+            # 🔹 Setup GCC 12.2 aarch64
+      - name: Setup GCC 12.2 aarch64
         run: |
-          GCC_PATH="$PWD/toolchain/gcc-13.4.0-aarch64"
+          GCC_PATH="$PWD/toolchain/gcc-12.2.0"
           mkdir -p "$GCC_PATH"
-          wget -O gcc-13.4.0-aarch64.tar.bz2 \
-            "https://github.com/termux-user-repository/ndk-toolchain-gcc-13/releases/download/v13.4.0-r0/gcc-13.4.0-aarch64.tar.bz2"
-          tar -xjf gcc-13.4.0-aarch64.tar.bz2 -C "$GCC_PATH"
-          GCC_BIN=$(find "$GCC_PATH" -type d -name "bin" | head -n1)
+          wget -O gcc-12.2.0.tar.gz https://ftp.gnu.org/gnu/gcc/gcc-12.2.0/gcc-12.2.0.tar.gz
+          tar -xvzf gcc-12.2.0.tar.gz -C "$GCC_PATH" --strip-components=1
+          
+          # Build GCC (optional, if prebuilt not available)
+          cd "$GCC_PATH"
+          ./contrib/download_prerequisites
+          mkdir build && cd build
+          ../configure --prefix="$GCC_PATH/install" --enable-languages=c,c++ --disable-multilib
+          make -j$(nproc)
+          make install
+          
+          GCC_BIN="$GCC_PATH/install/bin"
           echo "PATH=$GCC_BIN:$PATH" >> $GITHUB_ENV
           echo "CROSS_COMPILE=$GCC_BIN/aarch64-linux-gnu-" >> $GITHUB_ENV
+
 
       # 🔹 Clone AOSP core (for liblog)
       - name: Clone AOSP core if missing
