@@ -37,13 +37,14 @@ jobs:
             build-essential git bc bison flex libssl-dev libncurses5-dev \
             libelf-dev wget tar unzip zip ccache zstd
 
-      - name: Setup Proton Clang
+            # 🔹 Setup prebuilt LLVM/Clang (via llvm-project release)
+      - name: Setup LLVM/Clang from llvm-project Release
         run: |
           TOOLCHAIN_PATH="$PWD/toolchain/clang"
           mkdir -p "$TOOLCHAIN_PATH"
-          wget -O proton-clang.tar.xz "https://github.com/kdrag0n/proton-clang/releases/download/20210522/proton-clang-20210522-x86_64-linux-gnu-ubuntu-20.04.tar.xz"
-          tar -xf proton-clang.tar.xz -C "$TOOLCHAIN_PATH"
-          TOOLCHAIN_BIN="$TOOLCHAIN_PATH/proton-clang-20210522/bin"
+          wget -O clang.tar.xz "https://github.com/llvm/llvm-project/releases/download/llvmorg-21.1.3/clang+llvm-21.1.3-x86_64-linux-gnu-ubuntu-20.04.tar.xz"
+          tar -xf clang.tar.xz -C "$TOOLCHAIN_PATH"
+          TOOLCHAIN_BIN=$(find "$TOOLCHAIN_PATH" -type d -name "bin" | head -n1)
           echo "PATH=$TOOLCHAIN_BIN:$PATH" >> $GITHUB_ENV
           echo "CC=$TOOLCHAIN_BIN/clang" >> $GITHUB_ENV
           echo "LD=$TOOLCHAIN_BIN/ld.lld" >> $GITHUB_ENV
@@ -53,6 +54,7 @@ jobs:
           echo "OBJDUMP=$TOOLCHAIN_BIN/llvm-objdump" >> $GITHUB_ENV
           echo "STRIP=$TOOLCHAIN_BIN/llvm-strip" >> $GITHUB_ENV
           echo "CROSS_COMPILE=$TOOLCHAIN_BIN/aarch64-linux-gnu-" >> $GITHUB_ENV
+
 
 
       # 🔹 Download AOSP core (pentru liblog)
