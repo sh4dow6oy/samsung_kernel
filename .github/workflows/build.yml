@@ -1,100 +1,79 @@
-name: Build Android Kernel
+name: 🧩 Samsung Kernel Builder (SM-G770F)
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
-    inputs:
-      model:
-        description: 'Device model (e.g., g770f)'
-        required: true
-        default: g770f
 
 jobs:
-  build-kernel:
+  build:
     runs-on: ubuntu-latest
 
     steps:
-      # 1️⃣ Checkout kernel repository
-      - name: Checkout kernel source
-        uses: actions/checkout@v3
-        with:
-          repository: sh4dow6oy/samsung_kernel
-          ref: SM-G770F
-          submodules: recursive
+      - name: 📥 Checkout source
+        uses: actions/checkout@v4
 
-      # 2️⃣ Install dependencies
-      - name: Install build dependencies
+      - name: 🧰 Setup environment
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential git bc bison flex libssl-dev libncurses5-dev \
-            libelf-dev wget tar clang lld llvm
+          sudo apt update
+          sudo apt install -y bc bison flex git zip curl kmod cpio libncurses5-dev libssl-dev \
+            gcc clang llvm lld make python3 wget
 
-      # 3️⃣ Setup Clang r416183b (AOSP)
-      - name: Setup Clang toolchain (r416183b)
+      # Download and extract Clang r416183b from AOSP mirrors
+      - name: ⚙️ Setup Clang toolchain
         run: |
           TOOLCHAIN_PATH="$PWD/toolchain/clang"
           mkdir -p "$TOOLCHAIN_PATH"
-          echo "⬇️ Downloading Clang r416183b from AOSP..."
-          wget -O clang-r416183b.tar.gz \
-            "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/bd96dfe349c962681f0e5388af874c771ef96670/clang-r416183b.tar.gz"
-          tar -xzf clang-r416183b.tar.gz -C "$TOOLCHAIN_PATH"
-          TOOLCHAIN_BIN=$(find "$TOOLCHAIN_PATH" -type d -name "bin" | head -n1)
-          echo "PATH=$TOOLCHAIN_BIN:$PATH" >> $GITHUB_ENV
+          echo "📦 Downloading Clang r416183b..."
+          wget -qO clang.tar.xz "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/b669748458572622ed716407611633c5415da25c/clang-r416183b.tar.xz"
+          echo "📂 Extracting..."
+          tar -xf clang.tar.xz -C "$TOOLCHAIN_PATH"
+          echo "PATH=$TOOLCHAIN_PATH/clang-r416183b/bin:$PATH" >> $GITHUB_ENV
           echo "CC=clang" >> $GITHUB_ENV
-          echo "✅ Clang r416183b setup complete"
+          echo "Clang toolchain setup complete ✅"
 
-      # 4️⃣ Setup GCC cross compiler (ARM64)
-      - name: Setup GCC aarch64 cross-compiler
+      # ARM64 GCC toolchain (cross-compiler)
+      - name: 🧩 Setup ARM64 GCC
         run: |
           GCC_PATH="$PWD/toolchain/gcc"
           mkdir -p "$GCC_PATH"
-          echo "⬇️ Downloading ARM GCC 14.2..."
-          wget -O gcc-aarch64.tar.xz \
-            "https://github.com/ravindu644/Android-Kernel-Tutorials/releases/download/toolchains/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu.tar.xz"
-          tar -xJf gcc-aarch64.tar.xz -C "$GCC_PATH"
-          GCC_BIN=$(find "$GCC_PATH" -type d -name "bin" | head -n1)
-          echo "PATH=$GCC_BIN:$PATH" >> $GITHUB_ENV
-          echo "CROSS_COMPILE=aarch64-none-linux-gnu-" >> $GITHUB_ENV
-          echo "✅ GCC 14.2 toolchain ready"
+          echo "📦 Downloading GCC toolchain..."
+          wget -qO arm64-gcc.tar.xz "https://github.com/ravindu644/Android-Kernel-Tutorials/releases/download/toolchains/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu.tar.xz"
+          tar -xf arm64-gcc.tar.xz -C "$GCC_PATH"
+          echo "CROSS_COMPILE=$GCC_PATH/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu/bin/aarch64-none-linux-gnu-" >> $GITHUB_ENV
+          echo "ARM64 GCC ready ✅"
 
-      # 5️⃣ Detect defconfig
-      - name: Detect defconfig
-        id: detect-config
+      # Configure kernel with existing defconfig
+      - name: ⚙️ Configure kernel
         run: |
-          MODEL=${{ github.event.inputs.model }}
-          DEFCONFIG=$(ls arch/arm64/configs/*_${MODEL}_defconfig 2>/dev/null || ls arch/arm64/configs/*_defconfig | head -n 1)
-          if [ -z "$DEFCONFIG" ]; then
-            echo "❌ Error: No defconfig found for model $MODEL"
-            exit 1
-          fi
-          echo "DEFCONFIG_NAME=$(basename $DEFCONFIG)" >> $GITHUB_OUTPUT
-          echo "✅ Using defconfig: $DEFCONFIG"
+          echo "🧩 Using defconfig: g770f_defconfig"
+          make O=out ARCH=arm64 g770f_defconfig CC=$CC
 
-      # 6️⃣ Clean output directory
-      - name: Clean output directory
-        run: rm -rf out
-
-      # 7️⃣ Configure kernel
-      - name: Configure kernel
+      # 🩹 Patch unsupported compiler flags (stack protector)
+      - name: 🩹 Patch kernel config
         run: |
-          make O=out ARCH=arm64 ${{ steps.detect-config.outputs.DEFCONFIG_NAME }} CC=$CC CROSS_COMPILE=$CROSS_COMPILE
-        working-directory: .
+          echo "🩹 Disabling unsupported stack protector..."
+          sed -i 's/CONFIG_CC_STACKPROTECTOR_STRONG=y/# CONFIG_CC_STACKPROTECTOR_STRONG is not set/g' out/.config || true
+          sed -i 's/CONFIG_CC_STACKPROTECTOR=y/# CONFIG_CC_STACKPROTECTOR is not set/g' out/.config || true
+          echo "CONFIG_CC_STACKPROTECTOR_NONE=y" >> out/.config
+          make O=out ARCH=arm64 olddefconfig
 
-      # 8️⃣ Build kernel with Clang + GCC
-      - name: Build kernel
+      # Compile kernel
+      - name: 🏗️ Build kernel
         run: |
-          echo "🏗️ Starting kernel build..."
-          make O=out ARCH=arm64 \
-            CC=clang \
+          echo "🚀 Building kernel..."
+          make O=out ARCH=arm64 CC=clang \
             CROSS_COMPILE=$CROSS_COMPILE \
             LD=ld.lld \
             KCFLAGS="-fno-stack-protector" \
+            KBUILD_CFLAGS="-fno-stack-protector" \
+            KBUILD_CFLAGS_MODULE="-fno-stack-protector" \
             -j$(nproc)
-        working-directory: .
 
-      # 9️⃣ Upload kernel image
-      - name: Upload kernel image
+      # Upload build artifacts
+      - name: 📦 Upload kernel image
         uses: actions/upload-artifact@v4
         with:
-          name: kernel-image
-          path: out/arch/arm64/boot/Image.gz-dtb
+          name: kernel-out
+          path: out/arch/arm64/boot/Image*
