@@ -8,32 +8,29 @@ on:
         required: true
         default: g770f
 
-env:
-  ARCH: arm64
-  OUT: out
-  PATH: ${{ github.workspace }}/toolchain/clang/bin:${{ github.workspace }}/toolchain/gcc/bin:$PATH
-  CC: clang
-  CROSS_COMPILE: aarch64-none-linux-gnu-
-
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
+      # 🔹 Checkout repo complet cu submodule-uri
       - name: Checkout kernel source
         uses: actions/checkout@v3
         with:
           repository: sh4dow6oy/samsung_kernel
           ref: SM-G770F
           submodules: recursive
+          fetch-depth: 0   # Clonează tot istoricul pentru compatibilitate
 
+      # 🔹 Instalare dependențe
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             build-essential git bc bison flex libssl-dev libncurses5-dev \
-            libelf-dev wget tar clang lld llvm zip unzip
+            libelf-dev wget tar clang lld llvm unzip zip ccache
 
+      # 🔹 Setup Clang r416183b
       - name: Setup Clang r416183b (AOSP)
         run: |
           TOOLCHAIN_PATH="$PWD/toolchain/clang"
@@ -41,7 +38,11 @@ jobs:
           wget -O clang-r416183b.tar.gz \
             "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/bd96dfe349c962681f0e5388af874c771ef96670/clang-r416183b.tar.gz"
           tar -xzf clang-r416183b.tar.gz -C "$TOOLCHAIN_PATH"
+          TOOLCHAIN_BIN=$(find "$TOOLCHAIN_PATH" -type d -name "bin" | head -n1)
+          echo "PATH=$TOOLCHAIN_BIN:$PATH" >> $GITHUB_ENV
+          echo "CC=clang" >> $GITHUB_ENV
 
+      # 🔹 Setup GCC cross-compiler
       - name: Setup GCC aarch64 cross-compiler
         run: |
           GCC_PATH="$PWD/toolchain/gcc"
@@ -49,70 +50,54 @@ jobs:
           wget -O gcc-aarch64.tar.xz \
             "https://github.com/ravindu644/Android-Kernel-Tutorials/releases/download/toolchains/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu.tar.xz"
           tar -xJf gcc-aarch64.tar.xz -C "$GCC_PATH"
+          GCC_BIN=$(find "$GCC_PATH" -type d -name "bin" | head -n1)
+          echo "PATH=$GCC_BIN:$PATH" >> $GITHUB_ENV
+          echo "CROSS_COMPILE=aarch64-none-linux-gnu-" >> $GITHUB_ENV
 
+      # 🔹 Detect defconfig pentru modelul specificat
       - name: Detect defconfig
         id: detect-config
         run: |
           MODEL=${{ github.event.inputs.model }}
-          DEFCONFIG=$(ls arch/arm64/configs/*_${MODEL}_defconfig 2>/dev/null || ls arch/arm64/configs/*_defconfig | head -n 1)
+          DEFCONFIG=$(ls arch/arm64/configs/*_${MODEL}_defconfig 2>/dev/null || ls arch/arm64/configs/*_defconfig | head -n1)
           if [ -z "$DEFCONFIG" ]; then
-            echo "❌ No defconfig found for $MODEL"
+            echo "❌ No defconfig found for model $MODEL"
             exit 1
           fi
           echo "DEFCONFIG_NAME=$(basename $DEFCONFIG)" >> $GITHUB_OUTPUT
 
+      # 🔹 Curăță directorul de build
       - name: Clean output directory
         run: rm -rf out
 
+      # 🔹 Configure kernel
       - name: Configure kernel
         run: |
-          make O=out ARCH=${ARCH} ${{ steps.detect-config.outputs.DEFCONFIG_NAME }}
+          make O=out ARCH=arm64 ${{ steps.detect-config.outputs.DEFCONFIG_NAME }} CC=$CC CROSS_COMPILE=$CROSS_COMPILE
 
+      # 🔹 Patch kernel config (disable stack protector)
       - name: Patch kernel config
         run: |
           sed -i 's/CONFIG_CC_STACKPROTECTOR_STRONG=y/# CONFIG_CC_STACKPROTECTOR_STRONG is not set/g' out/.config || true
           sed -i 's/CONFIG_CC_STACKPROTECTOR=y/# CONFIG_CC_STACKPROTECTOR is not set/g' out/.config || true
           echo "CONFIG_CC_STACKPROTECTOR_NONE=y" >> out/.config
-          make O=out ARCH=${ARCH} olddefconfig
+          make O=out ARCH=arm64 olddefconfig
 
+      # 🔹 Build kernel
       - name: Build kernel
         run: |
-          make O=out ARCH=${ARCH} \
-            CC=${CC} CROSS_COMPILE=${CROSS_COMPILE} LD=ld.lld \
+          make O=out ARCH=arm64 \
+            CC=clang \
+            CROSS_COMPILE=$CROSS_COMPILE \
+            LD=ld.lld \
             KCFLAGS="-fno-stack-protector" \
             KBUILD_CFLAGS="-fno-stack-protector" \
             KBUILD_CFLAGS_MODULE="-fno-stack-protector" \
             -j$(nproc)
 
-      - name: Upload kernel artifacts
+      # 🔹 Upload kernel artifacts
+      - name: Upload kernel image
         uses: actions/upload-artifact@v4
         with:
-          name: kernel-artifacts
-          path: |
-            out/arch/arm64/boot/Image
-            out/arch/arm64/boot/Image.gz
-            out/arch/arm64/boot/Image.gz-dtb
-            out/arch/arm64/boot/dtbo.img
-
-      - name: Setup AnyKernel3
-        run: |
-          git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git
-          sed -i 's/do.devicecheck=1/do.devicecheck=0/g' AnyKernel3/anykernel.sh
-          sed -i 's/is_slot_device=1;/is_slot_device=auto;/g' AnyKernel3/anykernel.sh
-
-      - name: Copy kernel to AnyKernel3
-        run: |
-          cp -f out/arch/arm64/boot/Image AnyKernel3/ || true
-          cp -f out/arch/arm64/boot/Image.gz AnyKernel3/ || true
-          cp -f out/arch/arm64/boot/dtbo.img AnyKernel3/ || true
-
-      - name: Pack AnyKernel3
-        run: |
-          cd AnyKernel3
-          zip -r ../kernel-${{ github.event.inputs.model }}.zip *
-
-      - name: Upload AnyKernel3 zip
-        uses: actions/upload-artifact@v4
-        with:
-          name: AnyKernel3-${{ github.event.inputs.model }}
-          path: kernel-${{ github.event.inputs.model }}.zip
+          name: kernel-image
+          path: out/arch/arm64/boot/Image.gz-dtb
