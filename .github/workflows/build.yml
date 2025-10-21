@@ -20,7 +20,7 @@ jobs:
           repository: sh4dow6oy/samsung_kernel
           ref: SM-G770F
           submodules: recursive
-          fetch-depth: 0   # Clonează tot istoricul pentru compatibilitate
+          fetch-depth: 0
 
       # 🔹 Instalare dependențe
       - name: Install dependencies
@@ -30,7 +30,7 @@ jobs:
             build-essential git bc bison flex libssl-dev libncurses5-dev \
             libelf-dev wget tar clang lld llvm unzip zip ccache
 
-      # 🔹 Setup Clang r416183b
+      # 🔹 Setup Clang r416183b (AOSP)
       - name: Setup Clang r416183b (AOSP)
         run: |
           TOOLCHAIN_PATH="$PWD/toolchain/clang"
@@ -42,7 +42,7 @@ jobs:
           echo "PATH=$TOOLCHAIN_BIN:$PATH" >> $GITHUB_ENV
           echo "CC=clang" >> $GITHUB_ENV
 
-      # 🔹 Setup GCC cross-compiler
+      # 🔹 Setup GCC aarch64 cross-compiler
       - name: Setup GCC aarch64 cross-compiler
         run: |
           GCC_PATH="$PWD/toolchain/gcc"
@@ -53,6 +53,14 @@ jobs:
           GCC_BIN=$(find "$GCC_PATH" -type d -name "bin" | head -n1)
           echo "PATH=$GCC_BIN:$PATH" >> $GITHUB_ENV
           echo "CROSS_COMPILE=aarch64-none-linux-gnu-" >> $GITHUB_ENV
+
+      # 🔹 Download AOSP core (pentru liblog)
+      - name: Clone AOSP core if missing
+        run: |
+          if [ ! -d "$PWD/aosp/system/core" ]; then
+            mkdir -p aosp
+            git clone https://android.googlesource.com/platform/system/core aosp/system/core
+          fi
 
       # 🔹 Detect defconfig pentru modelul specificat
       - name: Detect defconfig
