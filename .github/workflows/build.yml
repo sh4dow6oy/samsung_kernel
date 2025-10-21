@@ -35,36 +35,29 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential git bc bison flex libssl-dev libncurses5-dev \
-            libelf-dev wget tar clang lld llvm unzip zip ccache zstd
+            libelf-dev wget tar clang lld llvm unzip zip ccache zstd cmake python3 ninja-build
 
-      # 🔹 Setup Proton Clang
-      - name: Setup Proton Clang
+      # 🔹 Build LLVM/Clang from source
+      - name: Build LLVM/Clang
         run: |
-          TOOLCHAIN_PATH="$PWD/toolchain/proton-clang"
-          mkdir -p "$TOOLCHAIN_PATH"
-          wget -O proton-clang.zip "https://github.com/kdrag0n/proton-clang/archive/refs/tags/20210522.zip"
-          unzip proton-clang.zip -d "$TOOLCHAIN_PATH"
-          TOOLCHAIN_BIN="$TOOLCHAIN_PATH/proton-clang-20210522/bin"
-          echo "PATH=$TOOLCHAIN_BIN:$PATH" >> $GITHUB_ENV
-          echo "CC=clang" >> $GITHUB_ENV
-          echo "LD=ld.lld" >> $GITHUB_ENV
-          echo "AR=llvm-ar" >> $GITHUB_ENV
-          echo "NM=llvm-nm" >> $GITHUB_ENV
-          echo "OBJCOPY=llvm-objcopy" >> $GITHUB_ENV
-          echo "OBJDUMP=llvm-objdump" >> $GITHUB_ENV
-          echo "STRIP=llvm-strip" >> $GITHUB_ENV
-
-      # 🔹 Setup GCC 13.4.0 aarch64 (optional, cross-compile)
-      - name: Setup GCC 13.4.0 aarch64
-        run: |
-          GCC_PATH="$PWD/toolchain/gcc-13.4.0-aarch64"
-          mkdir -p "$GCC_PATH"
-          wget -O gcc-13.4.0-aarch64.tar.bz2 \
-            "https://github.com/termux-user-repository/ndk-toolchain-gcc-13/releases/download/v13.4.0-r0/gcc-13.4.0-aarch64.tar.bz2"
-          tar -xjf gcc-13.4.0-aarch64.tar.bz2 -C "$GCC_PATH"
-          GCC_BIN=$(find "$GCC_PATH" -type d -name "bin" | head -n1)
-          echo "PATH=$GCC_BIN:$PATH" >> $GITHUB_ENV
-          echo "CROSS_COMPILE=$GCC_BIN/aarch64-linux-gnu-" >> $GITHUB_ENV
+          git clone --depth 1 https://github.com/llvm/llvm-project.git
+          mkdir llvm-project/build
+          cd llvm-project/build
+          cmake ../llvm \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DLLVM_TARGETS_TO_BUILD="AArch64" \
+            -DCMAKE_INSTALL_PREFIX=$PWD/../install
+          make -j$(nproc)
+          make install
+          echo "PATH=$PWD/../install/bin:$PATH" >> $GITHUB_ENV
+          echo "CC=$PWD/../install/bin/clang" >> $GITHUB_ENV
+          echo "LD=$PWD/../install/bin/ld.lld" >> $GITHUB_ENV
+          echo "CROSS_COMPILE=$PWD/../install/bin/aarch64-linux-gnu-" >> $GITHUB_ENV
+          echo "AR=$PWD/../install/bin/llvm-ar" >> $GITHUB_ENV
+          echo "NM=$PWD/../install/bin/llvm-nm" >> $GITHUB_ENV
+          echo "OBJCOPY=$PWD/../install/bin/llvm-objcopy" >> $GITHUB_ENV
+          echo "OBJDUMP=$PWD/../install/bin/llvm-objdump" >> $GITHUB_ENV
+          echo "STRIP=$PWD/../install/bin/llvm-strip" >> $GITHUB_ENV
 
       # 🔹 Download AOSP core (pentru liblog)
       - name: Clone AOSP core if missing
@@ -107,9 +100,9 @@ jobs:
       - name: Build kernel
         run: |
           make O=out ARCH=arm64 \
-            CC=clang \
+            CC=$CC \
             CROSS_COMPILE=$CROSS_COMPILE \
-            LD=ld.lld \
+            LD=$LD \
             KCFLAGS="-fno-stack-protector" \
             KBUILD_CFLAGS="-fno-stack-protector" \
             KBUILD_CFLAGS_MODULE="-fno-stack-protector" \
