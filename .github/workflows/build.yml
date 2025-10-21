@@ -13,6 +13,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # 1️⃣ Checkout kernel source
       - name: Checkout kernel source
         uses: actions/checkout@v3
         with:
@@ -20,54 +21,19 @@ jobs:
           ref: SM-G770F
           submodules: recursive
 
+      # 2️⃣ Install build dependencies
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential clang make git bc bison flex libssl-dev libncurses5-dev libelf-dev wget unzip
+          sudo apt-get install -y build-essential clang make git bc bison flex \
+            libssl-dev libncurses5-dev libelf-dev wget unzip tar xz-utils
 
-      - name: Setup Proton Clang 17.0.0 toolchain
+      # 3️⃣ Setup Clang toolchain (r383902b)
+      - name: Setup Clang toolchain (r383902b)
         run: |
           TOOLCHAIN_PATH="$PWD/toolchain/clang"
           mkdir -p "$TOOLCHAIN_PATH"
-          wget -O proton-clang.tar.xz "https://github.com/kdrag0n/proton-clang/releases/download/17.0.0/clang-r493334b.tar.xz"
-          tar -xf proton-clang.tar.xz -C "$TOOLCHAIN_PATH"
-          TOOLCHAIN_BIN="$TOOLCHAIN_PATH/clang-r493334b/bin"
-          echo "PATH=$TOOLCHAIN_BIN:$PATH" >> $GITHUB_ENV
-          echo "CC=clang" >> $GITHUB_ENV
-          echo "CROSS_COMPILE=aarch64-linux-gnu-" >> $GITHUB_ENV
-          echo "✅ Proton Clang setup complete"
-
-      - name: Detect defconfig
-        id: detect-config
-        run: |
-          MODEL=${{ github.event.inputs.model }}
-          DEFCONFIG=$(ls arch/arm64/configs/*_${MODEL}_defconfig 2>/dev/null || ls arch/arm64/configs/*_defconfig | head -n 1)
-          if [ -z "$DEFCONFIG" ]; then
-            echo "❌ Error: No defconfig found for model $MODEL"
-            exit 1
-          fi
-          echo "✅ Using defconfig: $DEFCONFIG"
-          echo "DEFCONFIG_NAME=$(basename $DEFCONFIG)" >> $GITHUB_OUTPUT
-
-      - name: Clean output folder
-        run: rm -rf out
-
-      - name: Configure kernel
-        run: make O=out ARCH=arm64 ${{ steps.detect-config.outputs.DEFCONFIG_NAME }} CC=$CC
-
-      - name: Build kernel
-        run: make O=out ARCH=arm64 CC=$CC CROSS_COMPILE=$CROSS_COMPILE -j$(nproc)
-
-      - name: Package kernel
-        run: |
-          mkdir -p package
-          cp out/arch/arm64/boot/Image.gz-dtb package/
-          make O=out ARCH=arm64 INSTALL_MOD_PATH=package modules_install
-          tar -czvf kernel-sm-g770f.tar.gz -C package .
-        working-directory: ./kernel
-
-      - name: Upload packaged kernel
-        uses: actions/upload-artifact@v4
-        with:
-          name: kernel-sm-g770f
-          path: kernel/out/kernel-sm-g770f.tar.gz
+          echo "⬇️ Downloading Clang r383902b..."
+          wget -O clang-r383902b.tar.gz "https://github.com/ravindu644/Android-Kernel-Tutorials/releases/download/toolchains/clang-r383902b.tar.gz"
+          echo "📦 Extracting..."
+          tar
