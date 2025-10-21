@@ -38,13 +38,12 @@ jobs:
           wget -O neutron-clang.tar.zst \
             "https://github.com/Neutron-Toolchains/clang-build-catalogue/releases/download/10032024/neutron-clang-10032024.tar.zst"
           tar --use-compress-program=unzstd -xf neutron-clang.tar.zst -C "$TOOLCHAIN_PATH"
-          TOOLCHAIN_BIN=$(find "$TOOLCHAIN_PATH" -type f -name "clang" | head -n1 | xargs dirname)
-          LD_BIN=$(find "$TOOLCHAIN_PATH" -type f -name "ld.lld" | head -n1 | xargs dirname)
-          echo "PATH=$TOOLCHAIN_BIN:$LD_BIN:$PATH" >> $GITHUB_ENV
-          echo "CC=$TOOLCHAIN_BIN/clang" >> $GITHUB_ENV
-          echo "LD=$LD_BIN/ld.lld" >> $GITHUB_ENV
+          TOOLCHAIN_BIN="$TOOLCHAIN_PATH/neutron-clang-10032024/bin"
+          echo "PATH=$TOOLCHAIN_BIN:$PATH" >> $GITHUB_ENV
+          echo "CC=clang" >> $GITHUB_ENV
+          echo "LD=ld.lld" >> $GITHUB_ENV
 
-      # 🔹 Setup GCC 13.4.0 aarch64
+      # 🔹 Setup GCC 13.4.0 aarch64 (Termux)
       - name: Setup GCC 13.4.0 aarch64
         run: |
           GCC_PATH="$PWD/toolchain/gcc-13.4.0-aarch64"
@@ -56,7 +55,7 @@ jobs:
           echo "PATH=$GCC_BIN:$PATH" >> $GITHUB_ENV
           echo "CROSS_COMPILE=$GCC_BIN/aarch64-linux-gnu-" >> $GITHUB_ENV
 
-      # 🔹 Clone AOSP core (for liblog)
+      # 🔹 Download AOSP core (pentru liblog)
       - name: Clone AOSP core if missing
         run: |
           if [ ! -d "$PWD/aosp/system/core" ]; then
@@ -97,9 +96,9 @@ jobs:
       - name: Build kernel
         run: |
           make O=out ARCH=arm64 \
-            CC=$CC \
-            LD=$LD \
+            CC=clang \
             CROSS_COMPILE=$CROSS_COMPILE \
+            LD=ld.lld \
             KCFLAGS="-fno-stack-protector" \
             KBUILD_CFLAGS="-fno-stack-protector" \
             KBUILD_CFLAGS_MODULE="-fno-stack-protector" \
