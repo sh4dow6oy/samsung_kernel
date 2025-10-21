@@ -50,7 +50,6 @@ jobs:
         run: |
           mkdir -p $HOME/toolchains
           cd $HOME/toolchains
-          # change these variables to a specific toolchain if desired
           TOOLCHAIN_TAR=gcc-linaro-7.5.0-2019.12-x86_64_aarch64-linux-gnu.tar.xz
           if [ ! -d "$HOME/toolchains/gcc-linaro" ]; then
             curl -sSL -O https://releases.linaro.org/components/toolchain/binaries/latest-7/aarch64/${TOOLCHAIN_TAR}
@@ -60,25 +59,22 @@ jobs:
           echo "$HOME/toolchains/gcc-linaro/bin" >> $GITHUB_PATH
 
       - name: Show defconfig input
-        run: |
-          echo "Using defconfig: ${{ github.event.inputs.defconfig }}"
+        run: echo "Using defconfig: ${{ github.event.inputs.defconfig }}"
 
       - name: Prepare build output & run defconfig
         run: |
           mkdir -p ${OUT}
-          # create .config from defconfig
           make O=${OUT} ARCH=${ARCH} ${{ github.event.inputs.defconfig }}
 
       - name: Build kernel, dtbs and modules
-        run: |
-          make -j$(nproc) O=${OUT} ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE}
+        run: make -j$(nproc) O=${OUT} ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE}
 
-      - name: Collect built kernel artifacts
+      - name: Collect kernel artifacts
         run: |
-          mkdir -p artifacts
-          cp -v ${OUT}/arch/arm64/boot/Image* artifacts/ || true
-          cp -v ${OUT}/arch/arm64/boot/dts/*.dtb artifacts/ || true
-          tar -czf artifacts/kernel_artifacts.tar.gz -C artifacts .
+          mkdir -p artifacts/kernel
+          cp -v ${OUT}/arch/arm64/boot/Image* artifacts/kernel/ || true
+          cp -v ${OUT}/arch/arm64/boot/dts/*.dtb artifacts/kernel/ || true
+          tar -czf artifacts/kernel/kernel_artifacts.tar.gz -C artifacts/kernel .
 
       - name: Download ramdisk if given
         if: ${{ github.event.inputs.ramdisk_url != '' }}
@@ -90,9 +86,8 @@ jobs:
       - name: Create boot image (if ramdisk present)
         if: ${{ github.event.inputs.ramdisk_url != '' }}
         run: |
-          # ensure mkbootimg.py exists in repo root or use packaged version
+          mkdir -p artifacts/boot
           if [ ! -f ./mkbootimg.py ]; then
-            # fallback: create minimal mkbootimg.py
             cat > mkbootimg.py <<'PY'
 #!/usr/bin/env python3
 import argparse,struct,os
@@ -123,7 +118,6 @@ if __name__=='__main__': main()
 PY
             chmod +x mkbootimg.py
           fi
-          # select kernel image (prefer Image.gz-dtb)
           if [ -f ${OUT}/arch/arm64/boot/Image.gz-dtb ]; then
             KIMG=${OUT}/arch/arm64/boot/Image.gz-dtb
           elif [ -f ${OUT}/arch/arm64/boot/Image ]; then
@@ -131,15 +125,13 @@ PY
           else
             echo "Kernel image not found in ${OUT}/arch/arm64/boot"; exit 1
           fi
-          python3 mkbootimg.py --kernel "$KIMG" --ramdisk ramdisk.img --base "${{ github.event.inputs.base }}" --pagesize ${{ github.event.inputs.pagesize }} --cmdline "${{ github.event.inputs.cmdline }}" --output boot_custom.img
-          ls -lh boot_custom.img
+          python3 mkbootimg.py --kernel "$KIMG" --ramdisk ramdisk.img --base "${{ github.event.inputs.base }}" --pagesize ${{ github.event.inputs.pagesize }} --cmdline "${{ github.event.inputs.cmdline }}" --output artifacts/boot/boot_custom.img
+          ls -lh artifacts/boot/boot_custom.img
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: kernel_and_boot
           path: |
-            artifacts/kernel_artifacts.tar.gz
-            ${OUT}/arch/arm64/boot/Image*
-            ${OUT}/arch/arm64/boot/dts/*.dtb
-            boot_custom.img
+            artifacts/kernel/kernel_artifacts.tar.gz
+            artifacts/boot/boot_custom.img
