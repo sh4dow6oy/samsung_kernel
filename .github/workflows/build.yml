@@ -28,21 +28,21 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential git bc bison flex libssl-dev libncurses5-dev \
-            libelf-dev wget tar clang lld llvm unzip zip ccache
+            libelf-dev wget tar zstd unzip zip ccache
 
-      # 🔹 Setup Clang r416183b (AOSP)
-      - name: Setup Clang r416183b (AOSP)
+      # 🔹 Setup Neutron Clang 10032024
+      - name: Setup Neutron Clang
         run: |
-          TOOLCHAIN_PATH="$PWD/toolchain/clang"
+          TOOLCHAIN_PATH="$PWD/toolchain/neutron-clang-10032024"
           mkdir -p "$TOOLCHAIN_PATH"
-          wget -O clang-r416183b.tar.gz \
-            "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/bd96dfe349c962681f0e5388af874c771ef96670/clang-r416183b.tar.gz"
-          tar -xzf clang-r416183b.tar.gz -C "$TOOLCHAIN_PATH"
+          wget -O neutron-clang-10032024.tar.zst \
+            "https://github.com/Neutron-Toolchains/clang-build-catalogue/releases/download/10032024/neutron-clang-10032024.tar.zst"
+          tar -I zstd -xvf neutron-clang-10032024.tar.zst -C "$TOOLCHAIN_PATH"
           TOOLCHAIN_BIN=$(find "$TOOLCHAIN_PATH" -type d -name "bin" | head -n1)
           echo "PATH=$TOOLCHAIN_BIN:$PATH" >> $GITHUB_ENV
           echo "CC=clang" >> $GITHUB_ENV
 
-       # 🔹 Setup GCC 13.4.0 aarch64 (Termux)
+      # 🔹 Setup GCC 13.4.0 aarch64 (Termux)
       - name: Setup GCC 13.4.0 aarch64
         run: |
           GCC_PATH="$PWD/toolchain/gcc-13.4.0-aarch64"
@@ -53,7 +53,6 @@ jobs:
           GCC_BIN=$(find "$GCC_PATH" -type d -name "bin" | head -n1)
           echo "PATH=$GCC_BIN:$PATH" >> $GITHUB_ENV
           echo "CROSS_COMPILE=$GCC_BIN/aarch64-linux-gnu-" >> $GITHUB_ENV
-
 
       # 🔹 Download AOSP core (pentru liblog)
       - name: Clone AOSP core if missing
